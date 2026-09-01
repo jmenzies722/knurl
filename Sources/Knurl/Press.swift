@@ -72,3 +72,16 @@ final class ImmediatePressView: NSView {
         bounds.contains(point) ? self : nil
     }
 }
+
+struct SelectedFaceGlass: ViewModifier {
+    var active: Bool
+    var namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if active {
+            content.glassEffectID("face", in: namespace)
+        } else {
+            content
+        }
+    }
+}

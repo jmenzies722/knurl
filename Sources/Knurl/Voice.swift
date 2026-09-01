@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import AVFoundation
+import KnurlCore
 import Observation
 import Speech
 
@@ -8,7 +9,10 @@ import Speech
 final class Voice {
     var isListening = false
     var preview = ""
+    var lastTranscript = ""
     var message: String?
+    var levels: [Float] = []
+    var languageName = Locale.current.localizedString(forIdentifier: Locale.current.identifier) ?? "System"
 
     var isActive: Bool { wantsListen || isListening }
 
@@ -94,7 +98,40 @@ final class Voice {
             text = finals.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         finals = ""
-        preview = ""
+        guard !text.isEmpty else {
+            preview = lastTranscript
+            return
+        }
+        lastTranscript = text
+        preview = text
+        levels = []
+        paste(text)
+    }
+
+    func cancel() async {
+        generation += 1
+        wantsListen = false
+        guard isListening else { return }
+        input?.finish()
+        if let analyzer {
+            await analyzer.cancelAndFinishNow()
+        }
+        teardown(engine)
+        resultsTask?.cancel()
+        engine = nil
+        analyzer = nil
+        transcriber = nil
+        input = nil
+        resultsTask = nil
+        isListening = false
+        stopping = false
+        preview = lastTranscript
+        levels = []
+        message = "Discarded"
+    }
+
+    func resend() {
+        let text = lastTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         paste(text)
     }
@@ -122,6 +159,7 @@ final class Voice {
         else {
             throw VoiceError.unavailable
         }
+        languageName = locale.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
         let transcriber = DictationTranscriber(locale: locale, preset: .progressiveShortDictation)
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             message = "Downloading speech…"
@@ -132,6 +170,9 @@ final class Voice {
             throw VoiceError.noFormat
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let context = AnalysisContext()
+        context.contextualStrings = [.general: FlowLexicon.phrases]
+        try? await analyzer.setContext(context)
         try await analyzer.prepareToAnalyze(in: format)
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         try await analyzer.start(inputSequence: stream)
@@ -181,7 +222,11 @@ final class Voice {
             }
             converter = built
         }
-        node.installTap(onBus: 0, bufferSize: 1024, format: source) { buffer, _ in
+        node.installTap(onBus: 0, bufferSize: 1024, format: source) { [weak self] buffer, _ in
+            let rms = Self.rms(buffer)
+            Task { @MainActor in
+                self?.pushLevel(rms)
+            }
             if let converter {
                 let ratio = format.sampleRate / source.sampleRate
                 let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 32)
@@ -265,7 +310,26 @@ final class Voice {
         if text.contains("not authorized") || text.contains("permission") {
             return "Allow Speech & Microphone in Settings."
         }
-        return "Couldn’t start talk."
+        return "Couldn’t start Flow."
+    }
+
+    private func pushLevel(_ rms: Float) {
+        var next = levels
+        next.append(min(1, rms * 8))
+        if next.count > 24 { next.removeFirst(next.count - 24) }
+        levels = next
+    }
+
+    private nonisolated static func rms(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let channel = buffer.floatChannelData?.pointee else { return 0 }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return 0 }
+        var sum: Float = 0
+        for index in 0 ..< count {
+            let sample = channel[index]
+            sum += sample * sample
+        }
+        return sqrt(sum / Float(count))
     }
 }
 

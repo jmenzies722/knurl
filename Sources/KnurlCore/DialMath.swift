@@ -50,4 +50,15 @@ public enum DialMath: Sendable {
         let total = max(0, Int(seconds.rounded()))
         return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
+
+    public static func sessionClock(_ interval: Double) -> String {
+        let total = max(0, Int(interval.rounded()))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
 }

@@ -6,9 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate?
 
     let state = DialState()
-    private var settings: NSWindow?
     private var ignoreHubReopen = false
-    private var readyForDeskReopen = false
+    private var consumeLaunchActivation = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -29,22 +28,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         state.startSession()
         state.park()
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
-            self.readyForDeskReopen = true
-        }
+        consumeLaunchActivation = true
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        consumeLaunchActivation = false
         openHub()
         return true
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if !readyForDeskReopen { return }
+        if consumeLaunchActivation {
+            consumeLaunchActivation = false
+            return
+        }
         if ignoreHubReopen { return }
         if state.isPresented { return }
-        if !state.isNotchExpanded {
+        if !HubWindow.shared.isVisible {
             openHub()
         }
     }
@@ -75,21 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openSettings() {
-        if settings == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 440, height: 420),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Knurl Settings"
-            window.contentView = NSHostingView(rootView: SettingsView(state: state))
-            window.isReleasedWhenClosed = false
-            window.center()
-            settings = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settings?.makeKeyAndOrderFront(nil)
+        state.presentHub()
+        state.wantsSettings = true
     }
 
     @objc func quit() {
@@ -115,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(appItem)
 
         let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Open Hub", action: #selector(openHub), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Open Knurl", action: #selector(openHub), keyEquivalent: "")
         windowMenu.addItem(withTitle: "Show Dial  \(HotkeyCenter.shared.chord)", action: #selector(showDial), keyEquivalent: "")
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

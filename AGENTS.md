@@ -1,11 +1,23 @@
 # Knurl
 
-Engineer desk for the Mac — notch glance, side dial, and a full-screen
-desk view (the Hub is that view). Five faces: Media, Volume, Bright,
-Output, Mic. Swift 6. macOS 26+ / iOS 26+, Apple Silicon only. Click
-the notch chip to expand the same Hub across the visible screen.
-Escape collapses it. Menu-bar crown and the edge HUD stay. Agent later.
-No Electron. No Catalyst.
+Product: `PRODUCT.md`. Architecture: `docs/KNURL_SESSION_LAYER_PLAN.md`.
+
+The harness does the coding. Knurl runs the desk and the
+human-attention loop. Five faces. Three surfaces. Six Hub pages.
+One Context Engine. Never a sixth face. Agent UI is Pulse /
+Attention / Receipts — not a dial mode.
+
+Engineer workstation for the Mac — a Tahoe Hub with a sidebar, a
+side dial, and a notch glance that sits in the black camera housing
+on notched Macs (M1 14/16-inch and later). The notch is its own
+feature: click it to drop a glass shelf from the housing, not the
+Hub. Cold start is parked (crown + rail + notch). Dock, ⌘-tab, and
+Open Knurl open the Hub. Settings live in the Hub. App Intents
+switch faces, swap output, and start or stop Flow.
+Five faces: Media, Volume, Bright, Output, Mic. Swift 6. macOS 26+ /
+iOS 26+, Apple Silicon only. No Electron. No Catalyst.
+No SkyLight — housing geometry is `auxiliaryTopLeftArea` /
+`auxiliaryTopRightArea`.
 
 Media follows Music.app. The dial is the playhead (`player position` /
 `duration`); drag and scroll seek. Play / pause / skip use Music Apple
@@ -16,21 +28,26 @@ MediaRemote, SystemMusicPlayer (unavailable on macOS), SkyLight, Polar,
 Input Monitoring, Screen Recording, keystroke storage, and screenshots
 are not.
 
-Talk lives on Mic. Hold Talk or ⌃⌥M. `SpeechAnalyzer` +
+Flow lives on Mic. Hold Flow or ⌃⌥M. `SpeechAnalyzer` +
 `DictationTranscriber` on-device. Text goes to the clipboard and one
 synthetic ⌘V. No AI rewrite, no cloud Whisper, no always-on mic, no
 sixth face.
 
-Spaces, Tile, and Scrub are gone — they only faked keystrokes and AX.
+Window Manager is an opt-in desk capability, not a face. It may use
+public Accessibility window attributes after the user enables it.
+Faces never request Accessibility. Do not require Screen Recording.
 
-The iPhone app is `Sources/KnurlPhone` + `project.yml` (XcodeGen). Same
-LAN only. No pairing store. Do not add a Catalyst destination.
+The iPhone app is `Sources/KnurlPhone` + `project.yml` (XcodeGen). It is
+the mobile crown of this Mac desk: same five faces, `_knurl._tcp`, no
+pairing store. Do not add a Catalyst destination. Relay is a different
+product — do not point this phone at `_relay._tcp`.
 
 Output lists Core Audio default-output devices (Bluetooth, HDMI,
 AirPlay-after-the-system-has-one) and hosts Apple’s `AVRoutePickerView`
 for HomePods / TVs. Knurl does not browse the LAN or pair Bluetooth.
 
-⌃⌥ arrows present Volume. ⌃⌥K summons the last face. ⌃⌥M is hold-to-talk.
+⌃⌥ arrows present Volume. ⌃⌥K summons the last face. ⌃⌥M is Flow.
 
 Do not grow a gesture editor. Polar, landing page, and pricing wait
-until the Mac dial is worth buying. KnurlPhone stays parked until then.
+until the Mac dial is worth buying. KnurlPhone is the iPhone half of
+this desk — keep it on the same LAN as the Mac process.

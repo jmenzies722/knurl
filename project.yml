@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.shualabs
   deploymentTarget:
     iOS: "26.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 packages:
   Knurl:
@@ -16,8 +17,19 @@ targets:
     dependencies:
       - package: Knurl
         product: KnurlLink
+      - package: Knurl
+        product: KnurlCore
     info:
       path: Sources/KnurlPhone/Info.plist
+      properties:
+        CFBundleDisplayName: Knurl
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSLocalNetworkUsageDescription: Knurl finds the Knurl desk on this Mac so you can turn the same crown from your iPhone. Nothing leaves your Wi-Fi.
+        NSBonjourServices:
+          - _knurl._tcp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shualabs.knurl.phone
@@ -30,6 +42,58 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: TXAL92T885
+  KnurlRemote:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/KnurlPhone
+        excludes:
+          - KnurlPhoneApp.swift
+          - Info.plist
+      - path: Sources/KnurlRemote
+    dependencies:
+      - package: Knurl
+        product: KnurlLink
+      - package: Knurl
+        product: KnurlCore
+    info:
+      path: Sources/KnurlRemote/Info.plist
+      properties:
+        CFBundleDisplayName: Knurl Phone
+        NSHighResolutionCapable: true
+        NSLocalNetworkUsageDescription: Knurl Phone finds the Knurl desk on this Mac so you can turn the same crown. Nothing leaves your Wi-Fi.
+        NSBonjourServices:
+          - _knurl._tcp
+    entitlements:
+      path: Sources/KnurlRemote/KnurlRemote.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shualabs.knurl.phone.mac
+        PRODUCT_NAME: Knurl Phone
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: TXAL92T885
+        ENABLE_HARDENED_RUNTIME: YES
+      configs:
+        Debug:
+          ENABLE_HARDENED_RUNTIME: NO
+schemes:
+  KnurlPhone:
+    build:
+      targets:
+        KnurlPhone: all
+    run:
+      config: Debug
+  KnurlRemote:
+    build:
+      targets:
+        KnurlRemote: all
+    run:
+      config: Debug
 settings:
   base:
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: TXAL92T885

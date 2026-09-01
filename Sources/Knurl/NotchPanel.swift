@@ -1,31 +1,15 @@
 import AppKit
+import CoreGraphics
 import KnurlCore
+import QuartzCore
 import SwiftUI
 
 final class NotchChipPanel: NSPanel {
-    var allowsKey = false
-
-    override var canBecomeKey: Bool { allowsKey }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
         AppDelegate.shared?.state.collapseNotch()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if AppDelegate.shared?.state.handleKey(event, escape: .hideHub) == true { return }
-        super.keyDown(with: event)
-    }
-}
-
-final class NotchHostingView<Content: View>: NSHostingView<Content> {
-    override var acceptsFirstResponder: Bool { true }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-        if AppDelegate.shared?.state.handleKey(event, escape: .hideHub) == true { return }
-        super.keyDown(with: event)
     }
 }
 
@@ -38,13 +22,10 @@ final class NotchPanel {
 
     private init() {}
 
-    var isExpanded: Bool { panel?.allowsKey == true }
-
     func attach(_ state: DialState) {
         let panel = ensure()
-        panel.contentView = NotchHostingView(rootView: NotchView(state: state))
+        panel.contentView = NSHostingView(rootView: NotchView(state: state))
         collapse()
-        panel.orderFront(nil)
         if observer == nil {
             observer = NotificationCenter.default.addObserver(
                 forName: NSApplication.didChangeScreenParametersNotification,
@@ -52,8 +33,7 @@ final class NotchPanel {
                 queue: .main
             ) { _ in
                 Task { @MainActor in
-                    let expanded = AppDelegate.shared?.state.isNotchExpanded == true
-                    if expanded {
+                    if AppDelegate.shared?.state.isNotchExpanded == true {
                         NotchPanel.shared.expand()
                     } else {
                         NotchPanel.shared.collapse()
@@ -64,59 +44,85 @@ final class NotchPanel {
     }
 
     func expand() {
+        guard let screen = notchedScreen(),
+              let housing = housing(on: screen)
+        else {
+            panel?.orderOut(nil)
+            return
+        }
         let panel = ensure()
-        let screen = preferredScreen()
-        panel.allowsKey = true
-        panel.setFrame(NotchMath.deskFrame(visible: screen.visibleFrame), display: true, animate: true)
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(panel.contentView)
-    }
-
-    func collapse() {
-        let panel = ensure()
-        let screen = preferredScreen()
-        panel.allowsKey = false
-        panel.resignKey()
-        panel.setFrame(
-            NotchMath.chipFrame(
-                visible: screen.visibleFrame,
-                leftAux: screen.auxiliaryTopLeftArea,
-                rightAux: screen.auxiliaryTopRightArea,
-                size: NotchMath.collapsedSize
-            ),
-            display: true,
-            animate: true
-        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.38
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(
+                NotchMath.expandedFrame(housing: housing, visible: screen.visibleFrame),
+                display: true
+            )
+        }
         panel.orderFront(nil)
     }
 
-    private func preferredScreen() -> NSScreen {
-        if let notched = NSScreen.screens.first(where: {
-            $0.auxiliaryTopLeftArea != nil && $0.auxiliaryTopRightArea != nil
-        }) {
-            return notched
+    func collapse() {
+        guard let screen = notchedScreen(),
+              let housing = housing(on: screen)
+        else {
+            panel?.orderOut(nil)
+            return
         }
-        return NSScreen.main ?? NSScreen.screens[0]
+        let panel = ensure()
+        panel.resignKey()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.28
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(housing, display: true)
+        } completionHandler: {
+            Task { @MainActor in
+                panel.isOpaque = true
+                panel.backgroundColor = .black
+            }
+        }
+        panel.orderFront(nil)
+    }
+
+    private func housing(on screen: NSScreen) -> CGRect? {
+        NotchMath.housingFrame(
+            screen: screen.frame,
+            visible: screen.visibleFrame,
+            leftAux: screen.auxiliaryTopLeftArea,
+            rightAux: screen.auxiliaryTopRightArea
+        )
+    }
+
+    private func notchedScreen() -> NSScreen? {
+        NSScreen.screens.first {
+            NotchMath.housingFrame(
+                screen: $0.frame,
+                visible: $0.visibleFrame,
+                leftAux: $0.auxiliaryTopLeftArea,
+                rightAux: $0.auxiliaryTopRightArea
+            ) != nil
+        }
     }
 
     private func ensure() -> NotchChipPanel {
         if let panel { return panel }
         let created = NotchChipPanel(
-            contentRect: NSRect(origin: .zero, size: NotchMath.collapsedSize),
+            contentRect: NSRect(origin: .zero, size: CGSize(width: 160, height: 32)),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         created.isFloatingPanel = true
-        created.level = .statusBar
+        created.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 2)
         created.hidesOnDeactivate = false
         created.becomesKeyOnlyIfNeeded = true
-        created.isOpaque = false
-        created.backgroundColor = .clear
+        created.isOpaque = true
+        created.backgroundColor = .black
         created.hasShadow = false
         created.isMovable = false
-        created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel = created
         return created
     }

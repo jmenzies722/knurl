@@ -1,23 +1,32 @@
 # Knurl
 
-The engineer desk on a Mac: a notch glance, a side dial, and a
-full-screen desk — the same Hub view — for indie devs, startups, and
-anyone who wants deep work in reach without leaving the editor.
+Product: [`PRODUCT.md`](PRODUCT.md). Plan:
+[`docs/KNURL_SESSION_LAYER_PLAN.md`](docs/KNURL_SESSION_LAYER_PLAN.md).
+
+The harness does the coding. Knurl runs the desk.
+
+The engineer desk on a Mac: a real Hub window, a side dial, and a
+notch glance flushed into the black camera housing.
 
 ```bash
 swift test
 scripts/run.sh
 ```
 
-The notch chip sits under the camera. Click it and the desk fills the
-screen — music, faces, Talk, outputs. Escape collapses it back. The
-Dock and ⌘-tab open that same view. Closing it does not quit.
+The **Hub** is the Mac app — a Tahoe window with a six-page sidebar
+(Home, Agents, Workspace, Flow, System, Sessions). Cold start is
+parked. Dock, ⌘-tab, and Open Knurl open the desk. Closing it does
+not quit. Settings live in the Hub (⌘,). The **notch** is separate: it
+sits in the housing on M1 14/16-inch Macs and later. Click it for a
+glass shelf from the camera housing, not the Hub.
 
 The rail parks on the right. **⌃⌥K** opens the side dial. **⌃⌥↑** /
 **⌃⌥↓** change volume from anywhere. **⌃⌥M** is hold-to-talk — release
 pastes into the app you were in.
 
-If Music.app is already playing, Knurl follows that track. Talk stays
-on this Mac. An agent is a later pass.
+If Music.app is already playing, Knurl follows that track. Knurl Flow
+stays on this Mac. The iPhone app is also Knurl — same LAN, same five
+faces. Live agent hooks are a later pass; the Hub chassis is honest
+when empty.
 
 Requires macOS 26+, Apple Silicon. Lab only. No Polar. No catalog.

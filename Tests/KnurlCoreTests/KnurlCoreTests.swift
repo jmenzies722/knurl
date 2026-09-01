@@ -9,19 +9,77 @@ import Testing
     #expect(DialMode.media.advanced(by: -1) == .mic)
 }
 
-@Test func notchChipCentersOnTheHousing() {
+@Test func notchSitsInTheHousing() {
+    let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
     let visible = CGRect(x: 0, y: 0, width: 1512, height: 944)
     let left = CGRect(x: 0, y: 944, width: 640, height: 38)
     let right = CGRect(x: 872, y: 944, width: 640, height: 38)
-    let frame = NotchMath.chipFrame(
+    let housing = NotchMath.housingFrame(
+        screen: screen,
         visible: visible,
         leftAux: left,
-        rightAux: right,
-        size: NotchMath.collapsedSize
+        rightAux: right
     )
-    #expect(abs(frame.midX - 756) < 1)
-    #expect(frame.maxY == visible.maxY)
-    #expect(NotchMath.deskFrame(visible: visible) == visible)
+    #expect(housing?.minX == 640)
+    #expect(housing?.width == 232)
+    #expect(housing?.minY == 944)
+    #expect(housing?.height == 38)
+    #expect(NotchMath.housingFrame(screen: screen, visible: visible, leftAux: nil, rightAux: nil) == nil)
+    if let housing {
+        let expanded = NotchMath.expandedFrame(housing: housing, visible: visible)
+        #expect(abs(expanded.midX - housing.midX) < 1)
+        #expect(expanded.maxY == housing.maxY)
+        #expect(expanded.height > housing.height)
+        #expect(expanded.minY < housing.minY)
+        let housed = NotchMath.housingInExpanded(housing: housing, expanded: expanded)
+        #expect(housed.height == housing.height)
+        #expect(housed.width == housing.width)
+    }
+}
+
+@Test func sixHubPagesAreTheWorkstation() {
+    #expect(HubPage.allCases.map(\.title) == [
+        "Home", "Agents", "Workspace", "Flow", "System", "Sessions",
+    ])
+}
+
+@Test func workspaceSnapsAreDeterministic() {
+    let visible = CGRect(x: 0, y: 0, width: 1800, height: 1000)
+    let left = WorkspaceMath.snap(.leftHalf, in: visible)
+    #expect(left.width == 900)
+    #expect(left.height == 1000)
+    let stack = WorkspaceMath.frames(for: .agentStack, visible: visible, count: 3)
+    #expect(stack.count == 3)
+    #expect(abs(stack[0].width - 1080) < 0.5)
+    #expect(abs(stack[1].width - 720) < 0.5)
+    let review = WorkspaceMath.frames(for: .review, visible: visible, count: 3)
+    #expect(review[2].minY == visible.minY)
+    #expect(review[0].maxY == visible.maxY)
+}
+
+@Test func notchWhisperPrefersAttentionOverMusic() {
+    let whisper = NotchWhisper.pick(
+        listening: false,
+        destination: "Cursor",
+        attention: "Claude Code",
+        thermalException: false,
+        batteryPercent: 71,
+        powerMode: "Balanced",
+        workspaceFlash: nil,
+        musicTitle: "Let It Happen",
+        elapsed: "01:12"
+    )
+    #expect(whisper == .attention(name: "Claude Code"))
+    #expect(whisper.line.contains("needs you"))
+}
+
+@Test func sessionClockFormatsHours() {
+    #expect(DialMath.sessionClock(74) == "01:14")
+    #expect(DialMath.sessionClock(3723) == "1:02:03")
+}
+
+@Test func powerModesStayKnurlOwned() {
+    #expect(PowerMode.allCases.map(\.title) == ["Battery", "Balanced", "Performance"])
 }
 
 @Test func fiveModesAreTheProduct() {
@@ -34,7 +92,8 @@ import Testing
     let confirms = DialMode.allCases.map(\.confirmTitle)
     #expect(Set(confirms).count == DialMode.allCases.count)
     #expect(DialMode.media.hint.contains("skip"))
-    #expect(DialMode.mic.hint.contains("Talk"))
+    #expect(DialMode.mic.hint.contains("Flow"))
+    #expect(DialMode.brightness.hint.contains("built-in"))
     #expect(DialMode.output.stepForwardSymbol == "chevron.right")
 }
 

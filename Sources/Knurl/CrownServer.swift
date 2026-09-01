@@ -8,7 +8,10 @@ final class CrownServer {
 
     private var listener: NWListener?
     private var connections: [NWConnection] = []
+    private var incoming: [ObjectIdentifier: Data] = [:]
+    private var lastArtKey: [ObjectIdentifier: String] = [:]
     private(set) var ready = false
+    var clientCount: Int { connections.count }
 
     private init() {}
 
@@ -45,15 +48,16 @@ final class CrownServer {
     func stop() {
         connections.forEach { $0.cancel() }
         connections = []
+        incoming = [:]
+        lastArtKey = [:]
         listener?.cancel()
         listener = nil
         ready = false
     }
 
     func broadcast() {
-        guard let payload = try? CrownJSON.encoder.encode(AppDelegate.shared?.state.crownHello()) else { return }
         for connection in connections {
-            send(payload, on: connection)
+            sendHello(connection, forceArt: false)
         }
     }
 
@@ -62,8 +66,9 @@ final class CrownServer {
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 if case .ready = state {
-                    self?.sendHello(connection)
+                    self?.sendHello(connection, forceArt: true)
                     self?.receive(connection)
+                    AppDelegate.shared?.state.noteCrownClient()
                 }
                 if case .failed = state { self?.drop(connection) }
                 if case .cancelled = state { self?.drop(connection) }
@@ -73,14 +78,21 @@ final class CrownServer {
     }
 
     private func receive(_ connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, isComplete, _ in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, _ in
             Task { @MainActor in
                 if let data, !data.isEmpty {
-                    let trimmed = data.prefix { $0 != 0x0A }
-                    if let request = try? CrownJSON.decoder.decode(CrownRequest.self, from: Data(trimmed)) {
-                        AppDelegate.shared?.state.applyCrown(request)
-                        self.sendHello(connection)
+                    let id = ObjectIdentifier(connection)
+                    var buffer = self.incoming[id] ?? Data()
+                    buffer.append(data)
+                    while let newline = buffer.firstIndex(of: 0x0A) {
+                        let chunk = buffer[..<newline]
+                        buffer.removeSubrange(...newline)
+                        if let request = try? CrownJSON.decoder.decode(CrownRequest.self, from: Data(chunk)) {
+                            AppDelegate.shared?.state.applyCrown(request)
+                            self.sendHello(connection, forceArt: request.action == .hello)
+                        }
                     }
+                    self.incoming[id] = buffer
                 }
                 if isComplete {
                     self.drop(connection)
@@ -91,8 +103,17 @@ final class CrownServer {
         }
     }
 
-    private func sendHello(_ connection: NWConnection) {
-        guard let payload = try? CrownJSON.encoder.encode(AppDelegate.shared?.state.crownHello()) else { return }
+    private func sendHello(_ connection: NWConnection, forceArt: Bool) {
+        guard var hello = AppDelegate.shared?.state.crownHello() else { return }
+        let id = ObjectIdentifier(connection)
+        if let cover = AppDelegate.shared?.state.coverJPEG() {
+            hello.artKey = cover.key
+            if forceArt || lastArtKey[id] != cover.key {
+                hello.art = cover.jpeg.base64EncodedString()
+                lastArtKey[id] = cover.key
+            }
+        }
+        guard let payload = try? CrownJSON.encoder.encode(hello) else { return }
         send(payload, on: connection)
     }
 
@@ -104,6 +125,9 @@ final class CrownServer {
 
     private func drop(_ connection: NWConnection) {
         connection.cancel()
+        let id = ObjectIdentifier(connection)
+        incoming[id] = nil
+        lastArtKey[id] = nil
         connections.removeAll { $0 === connection }
     }
 }

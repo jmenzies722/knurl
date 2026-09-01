@@ -24,11 +24,15 @@ let package = Package(
                 .linkedFramework("AVKit"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Speech"),
+                .linkedFramework("AppIntents"),
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("IOKit"),
             ]
         ),
         .testTarget(
             name: "KnurlCoreTests",
-            dependencies: ["KnurlCore"]
+            dependencies: ["KnurlCore", "KnurlLink"]
         ),
     ]
 )

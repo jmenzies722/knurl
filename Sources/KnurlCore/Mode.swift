@@ -60,10 +60,10 @@ public enum DialMode: String, CaseIterable, Sendable, Identifiable {
     public var hint: String {
         switch self {
         case .volume: "Turn for level. Click to mute."
-        case .brightness: "Turn for brightness. Click for halfway."
+        case .brightness: "Turn for this Mac’s built-in display. Externals keep their own controls. Click for halfway."
         case .media: "Turn to seek. Arrows skip. 1–5 switch faces. Click to play or pause."
         case .output: "Turn to pick a speaker. AirPlay for HomePods and TVs."
-        case .mic: "Turn for gain. Hold Talk or ⌃⌥M. Click to mute."
+        case .mic: "Turn for gain. Hold Flow or ⌃⌥M. Click to mute."
         }
     }
 

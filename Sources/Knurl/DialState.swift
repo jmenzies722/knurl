@@ -3,6 +3,7 @@ import Carbon
 import KnurlCore
 import KnurlLink
 import Observation
+import ServiceManagement
 
 @MainActor
 @Observable
@@ -26,8 +27,20 @@ final class DialState {
     var angle = DialMath.gaugeAngle(progress: 0)
     var tickSound: TickSound = Preferences.sound
     var hapticOn = Preferences.haptic
+    var harnessName = "Mac"
+    var wantsSettings = false
+    var launchesAtLogin = LoginItem.isEnabled
+    var loginItemError: String?
+    var inputUID = ""
+    var inputDevices: [AudioDevice] = []
     let music = NowPlaying()
     let voice = Voice()
+    let desk = DeskContext()
+
+    var hubPage: HubPage {
+        get { desk.page }
+        set { desk.page = newValue }
+    }
 
     private var lastDetent = -1
     private var scrollCarry = 0.0
@@ -42,6 +55,7 @@ final class DialState {
     private let mic = InputGain()
     private var sessionTask: Task<Void, Never>?
     private var editor: NSRunningApplication?
+    private var lastCrownSignature = ""
 
     var volumeProgress: Double { Double(volumePercent) / 100 }
 
@@ -143,10 +157,25 @@ final class DialState {
         summon()
     }
 
+    func noteCrownClient() {
+        startMeters()
+    }
+
     func startSession() {
         lastOutputUID = outputs.current?.uid
+        desk.start()
+        adoptHarness()
         OutputWatch.shared.start { [weak self] in
             self?.handleRouteChange()
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: NSWorkspace.shared,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                AppDelegate.shared?.state.adoptHarness()
+            }
         }
         sessionTask?.cancel()
         sessionTask = Task { @MainActor in
@@ -165,39 +194,98 @@ final class DialState {
             endTalk()
         }
         isPresented = false
-        if !isNotchExpanded, !HubWindow.shared.isVisible {
+        if !HubWindow.shared.isVisible {
             stopMeters()
         }
         HUDPanel.shared.parkCollapsed()
         restoreEditor()
     }
 
+    func toggleNotch() {
+        if isNotchExpanded {
+            collapseNotch()
+        } else {
+            expandNotch()
+        }
+    }
+
     func expandNotch() {
-        rememberEditor()
-        startMeters()
         isNotchExpanded = true
         NotchPanel.shared.expand()
     }
 
     func collapseNotch() {
-        if voice.isActive {
-            endTalk()
-        }
         isNotchExpanded = false
         NotchPanel.shared.collapse()
-        restoreEditor()
-        if !isPresented {
+    }
+
+    func presentHub() {
+        rememberEditor()
+        startMeters()
+        HubWindow.shared.show()
+    }
+
+    func hideHub() {
+        wantsSettings = false
+        HubWindow.shared.hide()
+        noteHubClosed()
+    }
+
+    func noteHubClosed() {
+        wantsSettings = false
+        if isPresented {
+            HUDPanel.shared.makeKey()
+        } else {
+            restoreEditor()
             stopMeters()
         }
     }
 
-    func presentHub() {
-        expandNotch()
+    var swapLabel: String {
+        if let previousOutput, previousOutput.uid != outputUID {
+            return "Swap to \(previousOutput.name)"
+        }
+        return "Swap"
     }
 
-    func hideHub() {
-        collapseNotch()
-        HubWindow.shared.hide()
+    var talkDestination: String {
+        "Words land in \(harnessName)"
+    }
+
+    var outputMemoryLine: String? {
+        guard let uid = outputs.current?.uid, let snapshot = outputMemory.recall(uid: uid) else {
+            return nil
+        }
+        if snapshot.muted {
+            return "Remembered muted for this speaker"
+        }
+        return "Remembered \(DialMath.percent(Double(snapshot.level)))% for this speaker"
+    }
+
+    func selectInput(_ device: AudioDevice) {
+        inputs.select(device.id)
+        refreshMeters()
+        DialTick.play()
+    }
+
+    func setLaunchesAtLogin(_ on: Bool) {
+        do {
+            try LoginItem.set(on)
+            launchesAtLogin = LoginItem.isEnabled
+            loginItemError = LoginItem.isEnabled || !on
+                ? nil
+                : "Allow Knurl under System Settings → General → Login Items."
+        } catch {
+            launchesAtLogin = LoginItem.isEnabled
+            switch SMAppService.mainApp.status {
+            case .requiresApproval:
+                loginItemError = "Allow Knurl under System Settings → General → Login Items."
+            case .notFound:
+                loginItemError = "Launch at Login needs the packaged Knurl.app."
+            default:
+                loginItemError = error.localizedDescription
+            }
+        }
     }
 
     func beginTalk(presentHUD: Bool = true) {
@@ -205,7 +293,7 @@ final class DialState {
         if isMicMuted {
             toggleMic()
         }
-        if control != .mic {
+        if presentHUD, control != .mic {
             selectControl(.mic)
         }
         if presentHUD {
@@ -215,11 +303,35 @@ final class DialState {
                 show()
             }
         }
+        desk.noteFlowStart()
         Task { await voice.start(editor: editor) }
     }
 
     func endTalk() {
-        Task { await voice.stop() }
+        Task {
+            await voice.stop()
+            desk.noteFlowEnd(characters: voice.lastTranscript.count)
+        }
+    }
+
+    func toggleTalk(presentHUD: Bool = true) {
+        if voice.isActive {
+            endTalk()
+        } else {
+            beginTalk(presentHUD: presentHUD)
+        }
+    }
+
+    func cancelTalk() {
+        Task { await voice.cancel() }
+    }
+
+    func resendTalk() {
+        voice.resend()
+    }
+
+    func jumpToHarness() {
+        restoreEditor()
     }
 
     func adoptSystemMeters() {
@@ -610,27 +722,114 @@ final class DialState {
         if !isPresented { show() }
         switch request.action {
         case .rotate:
-            rotate(request.detents ?? 1)
+            if let progress = request.progress {
+                guard DialMath.acceptsGaugeJump(from: controlProgress, to: progress) else { break }
+                applyControl(progress)
+            } else {
+                rotateControl(request.detents ?? 1)
+            }
         case .confirm:
-            confirm()
+            confirmDial()
         case .select:
             if let raw = request.mode, let next = DialMode(rawValue: raw) {
-                select(next)
+                selectControl(next)
             }
         case .hello:
             break
+        case .skip:
+            skip(request.detents ?? 1)
+        case .shuffle:
+            toggleShuffle()
+        case .repeat:
+            cycleRepeat()
+        case .pick:
+            if let name = request.name, !name.isEmpty {
+                pickCrown(name)
+            }
         }
         CrownServer.shared.broadcast()
     }
 
+    private func pickCrown(_ name: String) {
+        switch control {
+        case .media:
+            playSource(name)
+        case .output:
+            if let device = outputDevices.first(where: { $0.uid == name }) {
+                selectOutput(device)
+            }
+        case .mic:
+            if let device = inputDevices.first(where: { $0.uid == name }) {
+                selectInput(device)
+            }
+        default:
+            break
+        }
+    }
+
+    private var cachedCoverTitle = ""
+    private var cachedCover: (key: String, jpeg: Data)?
+
+    func coverJPEG() -> (key: String, jpeg: Data)? {
+        guard control == .media else { return nil }
+        let title = music.title
+        if title == cachedCoverTitle { return cachedCover }
+        guard let image = music.cover ?? MusicApp.artwork() else {
+            cachedCoverTitle = title
+            cachedCover = nil
+            return nil
+        }
+        let made = CoverJPEG.make(from: image)
+        cachedCoverTitle = title
+        cachedCover = made
+        return made
+    }
+
     func crownHello() -> CrownHello {
-        CrownHello(
+        let media = control == .media
+        return CrownHello(
             host: ProcessInfo.processInfo.hostName,
-            mode: mode.rawValue,
-            readout: readout,
-            progress: progress,
-            target: faceLabel
+            mode: control.rawValue,
+            readout: controlReadout,
+            progress: controlProgress,
+            target: media
+                ? (music.artist.isEmpty ? control.title : music.artist)
+                : control.title,
+            muted: (control == .volume && isMuted) || (control == .mic && isMicMuted),
+            playing: music.isPlaying,
+            duration: music.canSeek ? music.duration : nil,
+            title: media ? music.cardTitle : nil,
+            album: media && !music.album.isEmpty ? music.album : nil,
+            genre: media && !music.genre.isEmpty ? music.genre : nil,
+            shuffle: media ? music.shuffleOn : nil,
+            repeat: media ? music.repeatMode.rawValue : nil,
+            artKey: nil,
+            art: nil,
+            playlists: media
+                ? Array(music.sources.map(\.title).prefix(32)).map { String($0.prefix(40)) }
+                : nil,
+            devices: crownDevices,
+            deviceUID: crownDeviceUID
         )
+    }
+
+    private var crownDevices: [CrownDevice]? {
+        switch control {
+        case .output:
+            outputDevices.map { CrownDevice(id: $0.uid, name: $0.name, kind: $0.transport.title) }
+        case .mic:
+            inputDevices.map { CrownDevice(id: $0.uid, name: $0.name, kind: $0.transport.title) }
+        default:
+            nil
+        }
+    }
+
+    private var crownDeviceUID: String? {
+        switch control {
+        case .output: outputUID.isEmpty ? nil : outputUID
+        case .mic: inputUID.isEmpty ? nil : inputUID
+        default: nil
+        }
     }
 
     func openMusicSettings() {
@@ -687,7 +886,7 @@ final class DialState {
         DisplayBrightness.watch()
         meterTask?.cancel()
         meterTask = Task { @MainActor in
-            while !Task.isCancelled, isPresented {
+            while !Task.isCancelled, isPresented || HubWindow.shared.isVisible || CrownServer.shared.clientCount > 0 {
                 refreshMeters()
                 try? await Task.sleep(for: .milliseconds(280))
             }
@@ -712,13 +911,27 @@ final class DialState {
         outputUID = outputs.current?.uid ?? ""
         outputDevices = outputs.devices()
         inputName = inputs.current?.name ?? mic.deviceName
+        inputUID = inputs.current?.uid ?? ""
+        inputDevices = inputs.devices()
         micPercent = DialMath.percent(Double(mic.level))
         isMicMuted = mic.isMuted
         music.refresh()
+        if music.hasTrack {
+            desk.noteMusic(music.title)
+        }
         lastDetent = TickSound.detent(from: progress)
         syncAngle()
         rememberCurrentVolume()
         StatusBar.shared.refresh(self)
+        publishCrownIfNeeded()
+    }
+
+    private func publishCrownIfNeeded() {
+        let hello = crownHello()
+        let signature = "\(hello.mode)|\(hello.readout)|\(Int((hello.progress * 40).rounded()))|\(hello.muted ?? false)|\(hello.playing ?? false)|\(hello.title ?? "")|\(hello.shuffle ?? false)|\(hello.repeat ?? "")|\(hello.deviceUID ?? "")|\(coverJPEG()?.key ?? "")"
+        guard signature != lastCrownSignature else { return }
+        lastCrownSignature = signature
+        CrownServer.shared.broadcast()
     }
 
     private func rememberCurrentVolume() {
@@ -754,10 +967,18 @@ final class DialState {
         }
     }
 
+    func adoptHarness() {
+        rememberEditor()
+    }
+
     private func rememberEditor() {
         let front = NSWorkspace.shared.frontmostApplication
         if front?.bundleIdentifier != Bundle.main.bundleIdentifier {
             editor = front
+            if let name = front?.localizedName, !name.isEmpty {
+                harnessName = name
+                desk.noteHarness(name)
+            }
         }
     }
 

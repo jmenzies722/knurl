@@ -24,7 +24,7 @@ final class StatusBar {
         }
         let menu = NSMenu()
         menu.addItem(withTitle: "Show Knurl  \(HotkeyCenter.shared.chord)", action: show, keyEquivalent: "d")
-        menu.addItem(withTitle: "Open Hub", action: hub, keyEquivalent: "h")
+        menu.addItem(withTitle: "Open Knurl", action: hub, keyEquivalent: "h")
         menu.addItem(withTitle: "Settings…", action: settings, keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Knurl", action: quit, keyEquivalent: "q")

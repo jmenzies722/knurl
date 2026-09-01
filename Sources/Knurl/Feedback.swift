@@ -7,6 +7,9 @@ enum Preferences {
     private static let hapticKey = "knurl.tick.haptic"
     private static let modeKey = "knurl.last.mode"
     private static let outputKey = "knurl.output.memory"
+    private static let hubFrameKey = "knurl.hub.frame"
+    private static let windowManagerKey = "knurl.window.manager"
+    private static let powerModeKey = "knurl.power.mode"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -24,6 +27,29 @@ enum Preferences {
     static var lastMode: DialMode {
         get { DialMode(rawValue: UserDefaults.standard.string(forKey: modeKey) ?? "") ?? .media }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: modeKey) }
+    }
+
+    static var hubFrame: NSRect? {
+        get {
+            guard let stored = UserDefaults.standard.string(forKey: hubFrameKey) else { return nil }
+            let frame = NSRectFromString(stored)
+            return frame.width > 0 && frame.height > 0 ? frame : nil
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(NSStringFromRect(newValue), forKey: hubFrameKey)
+            }
+        }
+    }
+
+    static var windowManagerEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: windowManagerKey) }
+        set { UserDefaults.standard.set(newValue, forKey: windowManagerKey) }
+    }
+
+    static var powerMode: PowerMode {
+        get { PowerMode(rawValue: UserDefaults.standard.string(forKey: powerModeKey) ?? "") ?? .balanced }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: powerModeKey) }
     }
 
     static var outputMemory: OutputMemory {

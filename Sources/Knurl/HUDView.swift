@@ -4,6 +4,7 @@ import SwiftUI
 
 struct HUDView: View {
     @Bindable var state: DialState
+    @Namespace private var faces
 
     var body: some View {
         Group {
@@ -41,6 +42,11 @@ struct HUDView: View {
     private var expanded: some View {
         VStack(spacing: 16) {
             header
+            if !state.desk.attention.isEmpty {
+                Text("\(state.desk.attention[0].provider.title) needs you")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             CrownDial(state: state)
             controlBlock
             talkBar
@@ -127,7 +133,7 @@ struct HUDView: View {
         case .volume:
             return state.outputName
         case .brightness:
-            return "Display"
+            return "Built-in display"
         case .mic:
             if state.voice.isListening { return "Listening" }
             return state.inputName
@@ -154,7 +160,7 @@ struct HUDView: View {
                 HStack(spacing: 8) {
                     Image(systemName: state.voice.isListening ? "waveform" : "mic.fill")
                         .symbolEffect(.variableColor.iterative, isActive: state.voice.isListening)
-                    Text(state.voice.isListening ? "Release to paste" : "Hold to talk  ⌃⌥M")
+                    Text(state.voice.isListening ? "Release to paste" : "Hold Flow  ⌃⌥M")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
@@ -259,10 +265,11 @@ struct HUDView: View {
         .foregroundStyle(.primary.opacity(0.9))
         .glassEffect(
             selected
-                ? .regular.tint(tint.opacity(0.45))
-                : .regular.tint(tint.opacity(0.12)),
+                ? .regular.tint(tint.opacity(0.45)).interactive()
+                : .regular.tint(tint.opacity(0.12)).interactive(),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .modifier(SelectedFaceGlass(active: selected, namespace: faces))
         .overlay(
             ImmediatePress {
                 if selected {
@@ -327,6 +334,21 @@ struct HUDView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(state.swapLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .glassEffect(
+                            .regular.tint(DialSwatch.output.opacity(0.36)).interactive(),
+                            in: Capsule()
+                        )
+                        .overlay(ImmediatePress(action: { state.swapSpeaker() }))
+                }
+                if let memory = state.outputMemoryLine {
+                    Text(memory)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -448,9 +470,14 @@ private struct CrownDial: View {
                     .offset(y: -92)
                     .rotationEffect(.degrees(135 + Double(index) / 10 * 270))
             }
-            artwork
-                .frame(width: 168, height: 168)
-                .allowsHitTesting(false)
+            if state.voice.isListening {
+                FlowWaveform(levels: state.voice.levels, tint: .white, bars: 16)
+                    .frame(width: 140)
+            } else {
+                artwork
+                    .frame(width: 168, height: 168)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
