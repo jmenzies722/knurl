@@ -1,0 +1,35 @@
+name: KnurlPhone
+options:
+  bundleIdPrefix: com.shualabs
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  Knurl:
+    path: .
+targets:
+  KnurlPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/KnurlPhone
+    dependencies:
+      - package: Knurl
+        product: KnurlLink
+    info:
+      path: Sources/KnurlPhone/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shualabs.knurl.phone
+        PRODUCT_NAME: Knurl
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""

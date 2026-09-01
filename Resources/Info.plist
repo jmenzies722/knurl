@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Knurl</string>
+	<key>CFBundleDisplayName</key>
+	<string>Knurl</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.shualabs.knurl</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleExecutable</key>
+	<string>Knurl</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Knurl plays Apple Music from the rotary dial. Closing the dial does not stop the track.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Knurl reads the current track in Music and can start one of your playlists. Play, pause, and skip still use the system media keys.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Knurl listens only while you hold Talk or ⌃⌥M, then pastes the words into the app you were in. Audio never leaves this Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Knurl turns speech into text on this Mac while you hold Talk. Nothing is sent to a server.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Knurl talks to the iPhone crown on your Wi-Fi or personal hotspot. Nothing leaves the LAN.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_knurl._tcp</string>
+	</array>
+</dict>
+</plist>

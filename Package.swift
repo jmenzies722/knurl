@@ -1,0 +1,34 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "Knurl",
+    platforms: [
+        .macOS(.v26),
+        .iOS(.v26),
+    ],
+    products: [
+        .executable(name: "Knurl", targets: ["Knurl"]),
+        .library(name: "KnurlCore", targets: ["KnurlCore"]),
+        .library(name: "KnurlLink", targets: ["KnurlLink"]),
+    ],
+    targets: [
+        .target(name: "KnurlLink"),
+        .target(name: "KnurlCore"),
+        .executableTarget(
+            name: "Knurl",
+            dependencies: ["KnurlCore", "KnurlLink"],
+            linkerSettings: [
+                .linkedFramework("MusicKit"),
+                .linkedFramework("_MusicKit_SwiftUI"),
+                .linkedFramework("AVKit"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("Speech"),
+            ]
+        ),
+        .testTarget(
+            name: "KnurlCoreTests",
+            dependencies: ["KnurlCore"]
+        ),
+    ]
+)
