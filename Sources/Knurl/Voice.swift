@@ -224,11 +224,19 @@ final class Voice {
             }
             converter = built
         }
-        node.installTap(onBus: 0, bufferSize: 1024, format: source) { [weak self] buffer, _ in
-            let rms = Self.rms(buffer)
+        // installTap's block is not @Sendable in AVFAudio, so without an explicit
+        // @Sendable here the closure inherits this type's @MainActor isolation
+        // and Swift 6 emits a runtime isolation check at its entry. The block
+        // runs on the real-time audio thread, that check fails, and the process
+        // takes an EXC_BREAKPOINT. Marking it @Sendable removes the check; the
+        // level handoff below is what actually gets us back to the main actor.
+        let levelSink: @Sendable (Float) -> Void = { [weak self] rms in
             Task { @MainActor in
                 self?.pushLevel(rms)
             }
+        }
+        node.installTap(onBus: 0, bufferSize: 1024, format: source) { @Sendable buffer, _ in
+            levelSink(Self.rms(buffer))
             if let converter {
                 let ratio = format.sampleRate / source.sampleRate
                 let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 32)
