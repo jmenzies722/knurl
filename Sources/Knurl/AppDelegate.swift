@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate?
 
     let state = DialState()
+
+    let agents = AgentSessionManager()
     private var ignoreHubReopen = false
     private var consumeLaunchActivation = true
 
@@ -14,8 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         installMenu()
         HUDPanel.shared.attach(state)
-        HubWindow.shared.attach(state)
+        HubWindow.shared.attach(state, agents: agents)
         NotchPanel.shared.attach(state)
+        agents.start()
         HotkeyCenter.shared.start()
         CrownServer.shared.start()
         state.hotkeyError = HotkeyCenter.shared.lastError

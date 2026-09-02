@@ -74,11 +74,19 @@ struct HubSystem: View {
         case .mic:
             VStack(alignment: .leading, spacing: 18) {
                 DeskCrownBank(state: state, hero: .mic)
-                ForEach(state.inputDevices) { device in
-                    let selected = device.uid == state.inputUID
-                    HubFact(label: selected ? "Now" : "", value: device.name, secondary: device.transport.title)
-                        .contentShape(Rectangle())
-                        .overlay(ImmediatePress(action: { state.selectInput(device) }))
+                HubSection(title: "Input") {
+                    VStack(spacing: 2) {
+                        ForEach(state.inputDevices) { device in
+                            HubDeviceRow(
+                                name: device.name,
+                                detail: device.transport.title,
+                                symbol: device.transport.symbol,
+                                selected: device.uid == state.inputUID
+                            ) {
+                                state.selectInput(device)
+                            }
+                        }
+                    }
                 }
             }
         default:

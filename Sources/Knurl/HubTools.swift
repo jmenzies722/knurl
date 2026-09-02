@@ -130,6 +130,7 @@ struct HubToolCard: View {
     var symbol: String
     var selected: Bool = false
     var action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -144,11 +145,21 @@ struct HubToolCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(16)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // A card sits on the page, it does not float above it, so it gets a
+        // surface rather than glass. PRODUCT.md: not on every card.
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.background.secondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.separator.opacity(hovering ? 0.9 : 0.5), lineWidth: 1)
+        )
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityLabel("\(title). \(detail)")

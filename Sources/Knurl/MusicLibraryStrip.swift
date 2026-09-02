@@ -19,6 +19,19 @@ struct MusicLibraryStrip: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: compact ? 36 : 42)
+            // Without a soft edge the last chip looks cut off rather than
+            // scrollable, which is what it actually is.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.88),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
         }
     }
 
@@ -42,7 +55,7 @@ struct MusicLibraryStrip: View {
             .foregroundStyle(.primary.opacity(0.92))
             .glassEffect(
                 selected
-                    ? .regular.tint(HubTint.face(.media, progress: 0.6, muted: false).opacity(0.42)).interactive()
+                    ? .regular.tint(DialSwatch.stable(.media).opacity(0.42)).interactive()
                     : .regular.interactive(),
                 in: Capsule()
             )

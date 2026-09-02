@@ -31,6 +31,13 @@ final class DialState {
     var hapticOn = Preferences.haptic
     var harnessName = "Mac"
     var wantsSettings = false
+    var pillHovered = false
+    /// The pill morphs between its controls and the six Hub pages rather than
+    /// spawning a second navigator window.
+    var pillShowsPages = false
+    var hubOrder: [HubPage] = Preferences.hubOrder {
+        didSet { Preferences.hubOrder = hubOrder }
+    }
     var launchesAtLogin = LoginItem.isEnabled
     var loginItemError: String?
     var inputUID = ""
@@ -64,6 +71,17 @@ final class DialState {
     private var outputRosterFrozen = false
 
     var volumeProgress: Double { Double(volumePercent) / 100 }
+
+    /// One short line describing the current face, for the parked pill.
+    var collapsedLine: String {
+        switch control {
+        case .volume: isMuted ? "Muted" : "\(volumePercent)"
+        case .brightness: "\(brightnessPercent)"
+        case .mic: isMicMuted ? "Muted" : "\(micPercent)"
+        case .output: outputName
+        case .media: music.hasTrack ? music.title : "Nothing playing"
+        }
+    }
 
     var controlProgress: Double {
         switch control {
@@ -1159,6 +1177,10 @@ final class DialState {
         if isPresented, mode == .output {
             message = outputName
         }
+    }
+
+    func moveHubPages(from source: IndexSet, to destination: Int) {
+        hubOrder.move(fromOffsets: source, toOffset: destination)
     }
 
     func adoptHarness() {

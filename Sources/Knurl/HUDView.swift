@@ -16,8 +16,14 @@ struct HUDView: View {
         }
     }
 
+    /// Parked state: a pill above the Dock, in three sizes.
+    ///
+    /// Rest is three live controls and nothing else, dimmed so it reads as
+    /// furniture. Hover adds the label. Listening takes over entirely — the
+    /// waveform, the words as they land, and where they are going. Every
+    /// control works at rest, so hover is a bonus and never a requirement.
     private var collapsed: some View {
-        VStack(spacing: 10) {
+        HStack(spacing: 7) {
             Button {
                 state.summon()
             } label: {
@@ -25,18 +31,138 @@ struct HUDView: View {
             }
             .buttonStyle(.plain)
             .focusable(false)
-            Image(systemName: state.music.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 13, weight: .bold))
-                .frame(width: 34, height: 34)
-                .glassEffect(.regular, in: Circle())
-                .overlay(ImmediatePress(action: { state.collapsedPlay() }))
+
+            if state.voice.isListening {
+                flowLane
+                    .transition(.opacity)
+            } else if state.pillShowsPages {
+                pageLane
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            } else {
+                if state.pillHovered {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(state.controlTitle)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Text(state.collapsedLine)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(width: 108, alignment: .leading)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+                pillButton(
+                    symbol: "square.grid.2x2.fill",
+                    tint: .secondary,
+                    label: "Show Hub pages"
+                ) {
+                    state.pillShowsPages = true
+                    HUDPanel.shared.refreshPill()
+                }
+                pillButton(
+                    symbol: "mic.fill",
+                    tint: .secondary,
+                    label: "Start Knurl Flow"
+                ) {
+                    state.toggleTalk(presentHUD: false)
+                }
+                pillButton(
+                    symbol: state.music.isPlaying ? "pause.fill" : "play.fill",
+                    tint: .secondary,
+                    label: state.music.isPlaying ? "Pause" : "Play"
+                ) {
+                    state.collapsedPlay()
+                }
+            }
         }
-        .padding(12)
-        .frame(width: 76)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(alignment: .top) {
-            MoveBar().frame(height: 14)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .overlay(alignment: .leading) {
+            if state.pillHovered, !state.voice.isListening {
+                MoveBar().frame(width: 12).transition(.opacity)
+            }
         }
+        .opacity(state.pillHovered || state.voice.isListening ? 1 : 0.62)
+        .animation(.spring(duration: 0.26, bounce: 0.1), value: state.pillHovered)
+        .animation(.spring(duration: 0.3, bounce: 0.12), value: state.voice.isListening)
+        .animation(.spring(duration: 0.28, bounce: 0.12), value: state.pillShowsPages)
+        .onChange(of: state.voice.isListening) { HUDPanel.shared.refreshPill() }
+    }
+
+    /// The six Hub pages, inline. Picking one opens the Hub on that page, so
+    /// the pill navigates without becoming a second window.
+    private var pageLane: some View {
+        HStack(spacing: 4) {
+            ForEach(state.hubOrder) { page in
+                let selected = state.hubPage == page
+                Image(systemName: page.symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .frame(width: 32, height: 30)
+                    .glassEffect(
+                        selected ? .regular.tint(DialSwatch.stable(state.control).opacity(0.4)) : .regular,
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+                    .overlay(ImmediatePress {
+                        state.hubPage = page
+                        state.pillShowsPages = false
+                        HUDPanel.shared.refreshPill()
+                        state.presentHub()
+                    })
+                    .help(page.title)
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityLabel(page.title)
+            }
+            pillButton(symbol: "xmark", tint: .secondary, label: "Back to controls") {
+                state.pillShowsPages = false
+                HUDPanel.shared.refreshPill()
+            }
+        }
+    }
+
+    /// What the pill becomes while Flow is listening: level, words, destination,
+    /// and one obvious way to stop.
+    private var flowLane: some View {
+        HStack(spacing: 10) {
+            FlowWaveform(levels: state.voice.levels, tint: .accentColor, bars: 12)
+                .frame(width: 56)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.voice.preview.isEmpty ? "Listening…" : state.voice.preview)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .contentTransition(.opacity)
+                Text("→ \(state.harnessName)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 150, alignment: .leading)
+
+            pillButton(symbol: "stop.fill", tint: .accentColor, label: "Stop and paste") {
+                state.toggleTalk(presentHUD: false)
+            }
+        }
+    }
+
+    private func pillButton(
+        symbol: String,
+        tint: Color,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+            .frame(width: 30, height: 30)
+            .glassEffect(.regular, in: Circle())
+            .overlay(ImmediatePress(action: action))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(label)
     }
 
     private var expanded: some View {
@@ -100,17 +226,19 @@ struct HUDView: View {
     private var controlBlock: some View {
         VStack(spacing: 4) {
             if state.control == .media {
-                Text(state.music.hasTrack ? state.music.line : controlSubtitle)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                if !state.music.genre.isEmpty {
-                    Text(state.music.genre)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.tertiary)
+                // The header already names the track and artist, and the genre
+                // is a chip below. Only the clock is new information here.
+                if state.music.hasTrack, state.music.canSeek {
+                    Text(mediaClock)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .foregroundStyle(.primary.opacity(0.9))
+                } else {
+                    Text(controlSubtitle)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .help(state.music.genre)
                 }
             } else {
                 Text(state.controlReadout)
@@ -126,6 +254,11 @@ struct HUDView: View {
         }
         .frame(maxWidth: .infinity)
         .animation(.snappy(duration: 0.18), value: state.controlReadout)
+    }
+
+    private var mediaClock: String {
+        let elapsed = state.music.displayedPlayhead() * state.music.duration
+        return "\(DialMath.clock(elapsed))  −\(DialMath.clock(max(0, state.music.duration - elapsed)))"
     }
 
     private var controlSubtitle: String {
@@ -191,44 +324,78 @@ struct HUDView: View {
         }
     }
 
+    /// Three tiers, so the eye lands on play first: mode toggles are small and
+    /// only carry colour when they are on, skip is medium, play is primary.
     private var transport: some View {
         HStack(spacing: 8) {
             if state.control == .media {
-                transportButton("shuffle", selected: state.music.shuffleOn) {
+                transportButton("shuffle", tier: .toggle, selected: state.music.shuffleOn) {
                     state.toggleShuffle()
                 }
             }
-            transportButton("backward.fill") {
+            transportButton("backward.fill", tier: .secondary) {
                 state.skip(-1)
             }
             Image(systemName: state.music.isPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 16, weight: .bold))
-                .frame(width: 72, height: 40)
+                .font(.system(size: 17, weight: .bold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(.white)
+                .frame(width: 84, height: 44)
                 .glassEffect(
-                    .regular.tint(DialSwatch.tint(state.control, state: state).opacity(0.5)),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .regular.tint(DialSwatch.stable(state.control).opacity(0.62)),
+                    in: RoundedRectangle(cornerRadius: 15, style: .continuous)
                 )
                 .overlay(ImmediatePress(action: { state.collapsedPlay() }))
-            transportButton("forward.fill") {
+            transportButton("forward.fill", tier: .secondary) {
                 state.skip(1)
             }
             if state.control == .media {
-                transportButton(state.music.repeatMode.symbol, selected: state.music.repeatMode != .off) {
+                transportButton(
+                    state.music.repeatMode.symbol,
+                    tier: .toggle,
+                    selected: state.music.repeatMode != .off
+                ) {
                     state.cycleRepeat()
                 }
             }
         }
     }
 
-    private func transportButton(_ symbol: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+    private enum TransportTier {
+        case secondary
+        case toggle
+
+        var size: CGSize {
+            switch self {
+            case .secondary: CGSize(width: 48, height: 40)
+            case .toggle: CGSize(width: 38, height: 34)
+            }
+        }
+
+        var glyph: CGFloat {
+            switch self {
+            case .secondary: 13
+            case .toggle: 11
+            }
+        }
+    }
+
+    private func transportButton(
+        _ symbol: String,
+        tier: TransportTier,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Image(systemName: symbol)
-            .frame(width: 44, height: 40)
-            .foregroundStyle(selected ? DialSwatch.media : .primary.opacity(0.9))
+            .font(.system(size: tier.glyph, weight: .semibold))
+            // shuffle and repeat ship multicolour variants; without this the
+            // off state renders red and reads as an error.
+            .symbolRenderingMode(.monochrome)
+            .frame(width: tier.size.width, height: tier.size.height)
+            .foregroundStyle(selected ? AnyShapeStyle(DialSwatch.stable(state.control)) : AnyShapeStyle(.secondary))
             .glassEffect(
-                selected
-                    ? .regular.tint(DialSwatch.media.opacity(0.4))
-                    : .regular,
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                selected ? .regular.tint(DialSwatch.stable(state.control).opacity(0.34)) : .regular,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .overlay(ImmediatePress(action: action))
     }
@@ -253,13 +420,11 @@ struct HUDView: View {
                 .symbolEffect(.bounce, value: selected)
                 .foregroundStyle(tint)
             Text(satelliteLabel(mode))
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .lineLimit(1)
-                .minimumScaleFactor(0.65)
-            Text("\(number)")
-                .font(.system(size: 8, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .minimumScaleFactor(0.7)
         }
+        .help("\(mode.title) · press \(number)")
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .foregroundStyle(.primary.opacity(0.9))
@@ -338,7 +503,7 @@ struct HUDView: View {
         case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
         case .brightness: "\(state.brightnessPercent)"
         case .mic: state.voice.isListening ? "Flow" : (state.isMicMuted ? "Muted" : "Mic")
-        case .output: "Out"
+        case .output: state.outputKind
         case .media: mediaChipLabel
         }
     }
@@ -410,9 +575,11 @@ private struct CrownDial: View {
             Circle()
                 .stroke(.white.opacity(0.07), lineWidth: 20)
                 .padding(8)
+            // Dark track, not a light one: the fill has to win against a tinted
+            // well, and two similar values made the playhead unreadable.
             Circle()
                 .trim(from: 0, to: 0.75)
-                .stroke(.white.opacity(0.12), style: StrokeStyle(lineWidth: 11, lineCap: .round))
+                .stroke(.black.opacity(0.38), style: StrokeStyle(lineWidth: 11, lineCap: .round))
                 .padding(16)
                 .rotationEffect(.degrees(135))
             ForEach(0 ..< 11, id: \.self) { index in
@@ -439,10 +606,7 @@ private struct CrownDial: View {
                 .trim(from: 0, to: 0.75 * progress)
                 .stroke(
                     AngularGradient(
-                        colors: [
-                            DialSwatch.color(progress: 0, muted: false),
-                            tint,
-                        ],
+                        colors: [tint.opacity(0.75), tint],
                         center: .center,
                         startAngle: .degrees(135),
                         endAngle: .degrees(135 + 270 * max(progress, 0.001))
@@ -458,19 +622,6 @@ private struct CrownDial: View {
                 .offset(y: -92)
                 .rotationEffect(.degrees(DialMath.ringAngle(progress: progress)))
                 .shadow(color: tint.opacity(0.5), radius: 7)
-            VStack {
-                Spacer()
-                Text(wellCaption(progress: progress))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .glassEffect(.regular.tint(.black.opacity(0.35)), in: Capsule())
-                    .padding(.bottom, 22)
-            }
-            .frame(width: 168, height: 168)
         }
         .allowsHitTesting(false)
     }
@@ -534,7 +685,7 @@ private struct MiniDial: View {
 }
 
 @MainActor
-private enum DialSwatch {
+enum DialSwatch {
     static let bright = Color(red: 1.0, green: 0.78, blue: 0.32)
     static let mic = Color(red: 0.98, green: 0.55, blue: 0.42)
     static let output = Color(red: 0.42, green: 0.86, blue: 0.78)
@@ -542,6 +693,13 @@ private enum DialSwatch {
 
     static func volume(_ state: DialState) -> Color {
         color(progress: state.volumeProgress, muted: state.isMuted)
+    }
+
+    /// A fixed sample of a face's hue, for controls. The ring shows progress
+    /// through its length; buttons must not change colour as a track plays.
+    static func stable(_ mode: DialMode) -> Color {
+        let rgb = DialTint.rgb(progress: 0.6, muted: false, mode: mode)
+        return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
     }
 
     static func tint(_ mode: DialMode, state: DialState) -> Color {

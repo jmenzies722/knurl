@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 final class HubPanel: NSWindow {
@@ -10,15 +11,24 @@ final class HubPanel: NSWindow {
     }
 
     override func keyDown(with event: NSEvent) {
+        if knurlNavigationKey(event) { super.keyDown(with: event); return }
         if AppDelegate.shared?.state.handleKey(event, escape: .hideHub) == true { return }
         super.keyDown(with: event)
     }
 }
 
-final class HubHostingView<Content: View>: NSHostingView<Content> {
-    override var acceptsFirstResponder: Bool { true }
+/// Keys the Hub hands to the responder chain instead of the dial: whatever has
+/// focus (sidebar list, crown) decides, which is how AppKit expects it to work.
+func knurlNavigationKey(_ event: NSEvent) -> Bool {
+    switch Int(event.keyCode) {
+    case kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow, kVK_Tab: true
+    default: false
+    }
+}
 
+final class HubHostingView<Content: View>: NSHostingView<Content> {
     override func keyDown(with event: NSEvent) {
+        if knurlNavigationKey(event) { super.keyDown(with: event); return }
         if AppDelegate.shared?.state.handleKey(event, escape: .hideHub) == true { return }
         super.keyDown(with: event)
     }
@@ -30,6 +40,7 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     private var window: HubPanel?
     private var musicHost: NSHostingView<HubToolbarMusic>?
+    private var escapeMonitor: Any?
     private let musicID = NSToolbarItem.Identifier("knurl.music")
     private let settingsID = NSToolbarItem.Identifier("knurl.settings")
 
@@ -39,13 +50,29 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     var isVisible: Bool { window?.isVisible == true }
 
-    func attach(_ state: DialState) {
+    // SwiftUI's sidebar list swallows Escape before it reaches the responder
+    // chain, so the Hub watches for it ahead of the chain instead.
+    private func installEscapeMonitor() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard Int(event.keyCode) == kVK_Escape else { return event }
+            guard let self, let window = self.window else { return event }
+            guard event.window === window || NSApp.keyWindow === window else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods.isEmpty else { return event }
+            AppDelegate.shared?.state.hideHub()
+            return nil
+        }
+    }
+
+    func attach(_ state: DialState, agents: AgentSessionManager) {
+        installEscapeMonitor()
         let host = NSHostingView(rootView: HubToolbarMusic(state: state))
         host.setFrameSize(NSSize(width: 208, height: 30))
         host.setContentHuggingPriority(.defaultLow, for: .horizontal)
         musicHost = host
         let window = ensure()
-        window.contentView = HubHostingView(rootView: HubView(state: state))
+        window.contentView = HubHostingView(rootView: HubView(state: state, agents: agents))
         if let item = window.toolbar?.items.first(where: { $0.itemIdentifier == musicID }) {
             item.view = host
         }
@@ -53,10 +80,10 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     func show() {
         let window = ensure()
+        installEscapeMonitor()
         restoreFrame(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(window.contentView)
     }
 
     func hide() {

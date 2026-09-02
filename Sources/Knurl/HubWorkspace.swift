@@ -6,45 +6,13 @@ struct HubWorkspace: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HubPageScroll {
-            HubHallHeader(
-                title: "Workspace",
-                whisper: "Snap the room. Stay in the work."
-            ) {
-                Text(state.desk.windows.lastPreset?.title ?? "Free")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
+        Group {
             if !state.desk.windows.enabled {
-                HubSection(title: "Window manager") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Off until you ask. Knurl then uses Accessibility to move windows you choose — never Screen Recording.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HubGlassButton(title: "Enable Window Manager", symbol: "rectangle.split.2x2") {
-                            state.desk.windows.setEnabled(true)
-                        }
-                    }
-                }
+                offState
             } else if !state.desk.windows.trusted {
-                HubSection(title: "Accessibility") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(state.desk.windows.status ?? "Knurl needs Accessibility to move windows.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        HubGlassButton(title: "Open System Settings", symbol: "gearshape") {
-                            state.desk.windows.openAccessibilitySettings()
-                        }
-                    }
-                }
+                untrustedState
             } else {
-                canvases
-                HubDivider()
-                presets
-                HubDivider()
-                snaps
+                board
             }
         }
         .animation(
@@ -58,6 +26,51 @@ struct HubWorkspace: View {
             if state.desk.windows.enabled {
                 state.desk.windows.refresh()
             }
+        }
+    }
+
+    private var board: some View {
+        HubPageScroll {
+            HubHallHeader(
+                title: "Workspace",
+                whisper: "Snap the room. Stay in the work."
+            ) {
+                Text(state.desk.windows.lastPreset?.title ?? "Free")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            canvases
+            HubDivider()
+            presets
+            HubDivider()
+            snaps
+        }
+    }
+
+    private var offState: some View {
+        ContentUnavailableView {
+            Label("Window Manager is off", systemImage: "rectangle.split.2x2")
+        } description: {
+            Text("Turn it on and Knurl can snap the windows you pick. It asks for Accessibility then — never Screen Recording.")
+        } actions: {
+            Button("Enable Window Manager") {
+                state.desk.windows.setEnabled(true)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var untrustedState: some View {
+        ContentUnavailableView {
+            Label("Accessibility needed", systemImage: "lock.shield")
+        } description: {
+            Text(state.desk.windows.status ?? "Knurl needs Accessibility permission before it can move windows.")
+        } actions: {
+            Button("Open System Settings") {
+                state.desk.windows.openAccessibilitySettings()
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -184,13 +197,72 @@ struct WorkspaceCanvas: View {
     }
 }
 
+/// Wraps chips onto as many rows as the column needs. The previous version was
+/// an HStack, so a narrow Hub squeezed every preset onto one line.
 struct FlowLayout<Content: View>: View {
+    var spacing: CGFloat = 8
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        HStack(spacing: 8) {
+        WrapLayout(spacing: spacing) {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct WrapLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = rows(subviews: subviews, width: width)
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
+        let widest = rows.map(\.width).max() ?? 0
+        return CGSize(width: min(width, widest), height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(subviews: subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func rows(subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty, next > width {
+                rows.append(row)
+                row = Row()
+                row.indices = [index]
+                row.width = size.width
+                row.height = size.height
+            } else {
+                row.indices.append(index)
+                row.width = next
+                row.height = max(row.height, size.height)
+            }
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
     }
 }

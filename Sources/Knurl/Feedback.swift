@@ -10,6 +10,7 @@ enum Preferences {
     private static let hubFrameKey = "knurl.hub.frame"
     private static let windowManagerKey = "knurl.window.manager"
     private static let powerModeKey = "knurl.power.mode"
+    private static let hubOrderKey = "knurl.hub.order"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -50,6 +51,24 @@ enum Preferences {
     static var powerMode: PowerMode {
         get { PowerMode(rawValue: UserDefaults.standard.string(forKey: powerModeKey) ?? "") ?? .balanced }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: powerModeKey) }
+    }
+
+    /// The order the six Hub pages sit in the rail. Unknown or missing cases
+    /// fall back to declaration order, so adding a page never strands it.
+    static var hubOrder: [HubPage] {
+        get {
+            let stored = (UserDefaults.standard.array(forKey: hubOrderKey) as? [String]) ?? []
+            var pages = stored.compactMap(HubPage.init(rawValue:))
+            var seen = Set(pages)
+            for page in HubPage.allCases where !seen.contains(page) {
+                pages.append(page)
+                seen.insert(page)
+            }
+            return pages
+        }
+        set {
+            UserDefaults.standard.set(newValue.map(\.rawValue), forKey: hubOrderKey)
+        }
     }
 
     static var outputMemory: OutputMemory {

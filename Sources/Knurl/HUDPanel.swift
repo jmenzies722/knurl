@@ -5,7 +5,32 @@ final class DialHostingView<Content: View>: NSHostingView<Content> {
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
+    private var hoverArea: NSTrackingArea?
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// `.activeAlways` matters: Knurl is usually the background app while you
+    /// work, and the default tracking mode only fires in the key window, so
+    /// SwiftUI's .onHover never sees the pointer over the pill.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        HUDPanel.shared.setPillHover(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        HUDPanel.shared.setPillHover(false)
+    }
 
     override func keyDown(with event: NSEvent) {
         if AppDelegate.shared?.state.handleKey(event) == true { return }
@@ -53,12 +78,17 @@ private extension NSEvent {
 final class HUDPanel {
     static let shared = HUDPanel()
 
-    private static let edgeKey = "knurl.dock.trailing"
-    private static let yKey = "knurl.dock.y"
+    private static let xKey = "knurl.dock.x"
     private var panel: DialPanel?
     private var monitors: [Any] = []
     private var suppressMove = false
-    private let collapsedSize = NSSize(width: 92, height: 220)
+    private let pillSize = NSSize(width: 172, height: 52)
+    private let pillHoveredSize = NSSize(width: 288, height: 52)
+    private let pillListeningSize = NSSize(width: 330, height: 56)
+    private let pillPagesSize = NSSize(width: 300, height: 52)
+    /// Gap between the pill and the top of the Dock.
+    private let dockGap: CGFloat = 10
+    private var pillIsHovered = false
     private let expandedSize = NSSize(width: 436, height: 800)
 
     private init() {}
@@ -162,11 +192,14 @@ final class HUDPanel {
     private func ensurePanel() -> DialPanel {
         if let panel { return panel }
         let created = DialPanel(
-            contentRect: NSRect(origin: .zero, size: collapsedSize),
+            contentRect: NSRect(origin: .zero, size: pillSize),
             styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
+        // Without this a borderless non-activating panel never delivers
+        // mouse-moved events, so SwiftUI's .onHover never fires on the pill.
+        created.acceptsMouseMovedEvents = true
         created.isFloatingPanel = true
         created.level = .statusBar
         created.hidesOnDeactivate = false
@@ -211,12 +244,31 @@ final class HUDPanel {
         dock(panel, expanded: AppDelegate.shared?.state.isPresented == true)
     }
 
+    /// The pill lives on the bottom rail. Dragging slides it along that rail;
+    /// releasing settles it back above the Dock rather than flying to a side.
     private func snapToEdge() {
         guard let panel else { return }
         let screen = screen(containing: panel.frame)
-        UserDefaults.standard.set(panel.frame.midX > screen.midX, forKey: Self.edgeKey)
         rememberDock()
         dock(panel, expanded: AppDelegate.shared?.state.isPresented == true, screen: screen)
+    }
+
+    /// Grows the pill when the pointer is over it, so the resting footprint
+    /// stays as small as possible.
+    /// Re-docks the pill after a state change that alters its width, such as
+    /// Flow starting or stopping.
+    func refreshPill() {
+        guard let panel, AppDelegate.shared?.state.isPresented != true else { return }
+        dock(panel, expanded: false)
+    }
+
+    func setPillHover(_ hovering: Bool) {
+        guard pillIsHovered != hovering else { return }
+        guard AppDelegate.shared?.state.isPresented != true else { return }
+        pillIsHovered = hovering
+        AppDelegate.shared?.state.pillHovered = hovering
+        guard let panel else { return }
+        dock(panel, expanded: false)
     }
 
     private func dock(_ panel: DialPanel, expanded: Bool, screen: NSRect? = nil) {
@@ -230,19 +282,43 @@ final class HUDPanel {
 
     private func rememberDock() {
         guard let panel else { return }
-        UserDefaults.standard.set(panel.frame.midY, forKey: Self.yKey)
-        UserDefaults.standard.set(panel.frame.midX > screen(containing: panel.frame).midX, forKey: Self.edgeKey)
+        UserDefaults.standard.set(panel.frame.midX, forKey: Self.xKey)
     }
 
     private func dockedFrame(expanded: Bool, screen: NSRect? = nil) -> NSRect {
         let visible = screen ?? dockScreen()
-        let size = expanded ? expandedSize : collapsedSize
-        let trailing = UserDefaults.standard.object(forKey: Self.edgeKey) as? Bool ?? true
-        let x = trailing ? visible.maxX - size.width : visible.minX
-        let storedY = UserDefaults.standard.object(forKey: Self.yKey) as? CGFloat
-        let midY = storedY ?? visible.midY
-        let y = min(max(visible.minY + 24, midY - size.height / 2), visible.maxY - size.height - 24)
-        return NSRect(x: x, y: y, width: size.width, height: size.height)
+        let listening = AppDelegate.shared?.state.voice.isListening == true
+        let pages = AppDelegate.shared?.state.pillShowsPages == true
+        let parkedSize: NSSize = if listening {
+            pillListeningSize
+        } else if pages {
+            pillPagesSize
+        } else if pillIsHovered {
+            pillHoveredSize
+        } else {
+            pillSize
+        }
+        let size = expanded ? expandedContentSize() : parkedSize
+
+        // visibleFrame already excludes the Dock, so its minY is the Dock's top
+        // edge on any Dock size, position or autohide setting. Both states share
+        // that bottom anchor, so the dial grows up out of the pill rather than
+        // jumping somewhere else on screen.
+        let storedMidX = UserDefaults.standard.object(forKey: Self.xKey) as? CGFloat
+        let midX = storedMidX ?? visible.midX
+        let inset: CGFloat = expanded ? 16 : 8
+        let x = min(max(visible.minX + inset, midX - size.width / 2), visible.maxX - size.width - inset)
+        let height = min(size.height, visible.height - dockGap - 16)
+        return NSRect(x: x, y: visible.minY + dockGap, width: size.width, height: height)
+    }
+
+    /// The dial panel should be exactly as tall as the dial, so it sits on the
+    /// pill rather than floating inside a fixed 800pt window.
+    private func expandedContentSize() -> NSSize {
+        guard let content = panel?.contentView else { return expandedSize }
+        let fitting = content.fittingSize
+        guard fitting.height > 100 else { return expandedSize }
+        return NSSize(width: expandedSize.width, height: fitting.height)
     }
 
     private func dockScreen() -> NSRect {
