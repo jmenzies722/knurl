@@ -79,6 +79,7 @@ final class HUDPanel {
     static let shared = HUDPanel()
 
     private static let xKey = "knurl.dock.x"
+    private static let dialOriginKey = "knurl.dial.origin"
     private var panel: DialPanel?
     private var monitors: [Any] = []
     private var suppressMove = false
@@ -234,9 +235,27 @@ final class HUDPanel {
 
     private func handleMoved() {
         guard !suppressMove else { return }
+        // The dial goes wherever you put it and stays there. Only the parked
+        // pill is pinned to the rail above the Dock.
+        if AppDelegate.shared?.state.isPresented == true {
+            rememberDialOrigin()
+            return
+        }
         rememberDock()
         guard NSEvent.pressedMouseButtons == 0 else { return }
         snapToEdge()
+    }
+
+    private func rememberDialOrigin() {
+        guard let panel else { return }
+        UserDefaults.standard.set(NSStringFromPoint(panel.frame.origin), forKey: Self.dialOriginKey)
+    }
+
+    /// Forget the dial's parked position so it grows out of the pill again.
+    func resetDialPosition() {
+        UserDefaults.standard.removeObject(forKey: Self.dialOriginKey)
+        guard let panel, AppDelegate.shared?.state.isPresented == true else { return }
+        dock(panel, expanded: true)
     }
 
     private func redock() {
@@ -247,10 +266,10 @@ final class HUDPanel {
     /// The pill lives on the bottom rail. Dragging slides it along that rail;
     /// releasing settles it back above the Dock rather than flying to a side.
     private func snapToEdge() {
-        guard let panel else { return }
+        guard let panel, AppDelegate.shared?.state.isPresented != true else { return }
         let screen = screen(containing: panel.frame)
         rememberDock()
-        dock(panel, expanded: AppDelegate.shared?.state.isPresented == true, screen: screen)
+        dock(panel, expanded: false, screen: screen)
     }
 
     /// Grows the pill when the pointer is over it, so the resting footprint
@@ -309,6 +328,15 @@ final class HUDPanel {
         let inset: CGFloat = expanded ? 16 : 8
         let x = min(max(visible.minX + inset, midX - size.width / 2), visible.maxX - size.width - inset)
         let height = min(size.height, visible.height - dockGap - 16)
+
+        // A dial the user has moved keeps its own position; only its first
+        // appearance grows out of the pill.
+        if expanded, let stored = UserDefaults.standard.string(forKey: Self.dialOriginKey) {
+            let origin = NSPointFromString(stored)
+            let clampedX = min(max(visible.minX, origin.x), visible.maxX - size.width)
+            let clampedY = min(max(visible.minY, origin.y), visible.maxY - height)
+            return NSRect(x: clampedX, y: clampedY, width: size.width, height: height)
+        }
         return NSRect(x: x, y: visible.minY + dockGap, width: size.width, height: height)
     }
 

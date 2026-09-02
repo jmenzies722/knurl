@@ -203,10 +203,12 @@ struct HUDView: View {
                         .lineLimit(1)
                 }
             }
+            .contentShape(Rectangle())
+            // In front of the text, not behind it: as a .background the drag
+            // surface only caught the empty gap, so grabbing the title did
+            // nothing.
+            .overlay(MoveBar())
             Spacer(minLength: 8)
-            Color.clear
-                .frame(width: 72, height: 14)
-                .overlay(MoveBar())
             if state.control == .media {
                 Image(systemName: "music.note")
                     .font(.caption.weight(.semibold))
@@ -221,6 +223,17 @@ struct HUDView: View {
                 .glassEffect(.regular, in: Circle())
                 .overlay(ImmediatePress(action: { state.dismiss() }))
         }
+        // The whole header is the grab area, the way a title bar is. The old
+        // handle was an invisible 72pt strip nobody could find.
+        .background(MoveBar())
+        .overlay(alignment: .top) {
+            Capsule()
+                .fill(.secondary.opacity(0.35))
+                .frame(width: 34, height: 4)
+                .padding(.top, -6)
+                .allowsHitTesting(false)
+        }
+        .accessibilityLabel("Drag to move the dial")
     }
 
     private var controlBlock: some View {
