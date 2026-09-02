@@ -3,7 +3,10 @@ import SwiftUI
 
 final class DialHostingView<Content: View>: NSHostingView<Content> {
     override var acceptsFirstResponder: Bool { true }
-    override var mouseDownCanMoveWindow: Bool { false }
+    // Any part of the panel that is not a control drags the window. The crown
+    // keeps its own DragGesture and buttons keep their press overlays, so this
+    // only claims the empty space around them.
+    override var mouseDownCanMoveWindow: Bool { true }
 
     private var hoverArea: NSTrackingArea?
 
@@ -201,6 +204,7 @@ final class HUDPanel {
         // Without this a borderless non-activating panel never delivers
         // mouse-moved events, so SwiftUI's .onHover never fires on the pill.
         created.acceptsMouseMovedEvents = true
+        created.isMovableByWindowBackground = true
         created.isFloatingPanel = true
         created.level = .statusBar
         created.hidesOnDeactivate = false
@@ -208,7 +212,6 @@ final class HUDPanel {
         created.isOpaque = false
         created.backgroundColor = .clear
         created.hasShadow = false
-        created.isMovableByWindowBackground = false
         created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         created.animationBehavior = .utilityWindow
         NotificationCenter.default.addObserver(

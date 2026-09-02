@@ -181,11 +181,62 @@ struct HUDView: View {
             }
             librarySources
             outputRoster
+            hourStrip
             roomSatellites
         }
         .padding(18)
         .frame(width: 400)
         .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+
+    /// The Hour, in the dial menu. Deliberately not a sixth face: the five-face
+    /// grammar, the 1-5 keys and the phone wire format all stay as they are.
+    private var hourStrip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "timer")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(state.desk.timer.running ? AnyShapeStyle(DialSwatch.bright) : AnyShapeStyle(.secondary))
+            Text(state.desk.timer.readout)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .contentTransition(.numericText())
+                .frame(width: 56, alignment: .leading)
+
+            ForEach([15, 25, 50, 90], id: \.self) { minutes in
+                Text("\(minutes)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .frame(width: 32, height: 28)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(ImmediatePress { state.setHourDuration(Double(minutes) * 60) })
+                    .accessibilityLabel("\(minutes) minutes")
+            }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: state.desk.timer.running ? "pause.fill" : "play.fill")
+                .font(.caption.weight(.bold))
+                .frame(width: 34, height: 28)
+                .glassEffect(
+                    state.desk.timer.running
+                        ? .regular.tint(DialSwatch.bright.opacity(0.4))
+                        : .regular,
+                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                )
+                .overlay(ImmediatePress { state.toggleHour() })
+                .accessibilityLabel(state.desk.timer.running ? "Pause the Hour" : "Start the Hour")
+
+            if state.desk.timer.isArmed {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 28)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(ImmediatePress { state.resetHour() })
+                    .accessibilityLabel("Reset the Hour")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.snappy(duration: 0.2), value: state.desk.timer.running)
+        .animation(.snappy(duration: 0.2), value: state.desk.timer.readout)
     }
 
     private var header: some View {
