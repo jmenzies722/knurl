@@ -35,6 +35,8 @@ final class DialState {
     /// The pill morphs between its controls and the six Hub pages rather than
     /// spawning a second navigator window.
     var pillShowsPages = false
+    /// Non-nil when the dial menu is showing a tool's crown instead of a face.
+    var activeTool: DeskTool?
     var hubOrder: [HubPage] = Preferences.hubOrder {
         didSet { Preferences.hubOrder = hubOrder }
     }
@@ -570,6 +572,7 @@ final class DialState {
     }
 
     func selectControl(_ next: DialMode) {
+        activeTool = nil
         if control == .mic, next != .mic, flowOrigin == .hud {
             endTalk()
         }
@@ -705,6 +708,55 @@ final class DialState {
     func tickHour() {
         if desk.timer.tick(now: Date()) {
             finishHour()
+        }
+    }
+
+    func selectTool(_ tool: DeskTool?) {
+        activeTool = tool
+        DialTick.play()
+    }
+
+    /// Turning or clicking the crown of whichever tool is showing. Keeps the
+    /// tool switch in one place so a new tool only adds cases here.
+    func turnTool(_ value: Double) {
+        switch activeTool {
+        case .hour: setHourCrown(value)
+        case nil: break
+        }
+    }
+
+    func confirmTool() {
+        switch activeTool {
+        case .hour: toggleHour()
+        case nil: break
+        }
+    }
+
+    var toolReadout: String {
+        switch activeTool {
+        case .hour: desk.timer.readout
+        case nil: ""
+        }
+    }
+
+    var toolCaption: String {
+        switch activeTool {
+        case .hour: desk.timer.running ? "Running" : "Set"
+        case nil: ""
+        }
+    }
+
+    var toolSymbol: String {
+        switch activeTool {
+        case .hour: desk.timer.running ? "pause.fill" : "play.fill"
+        case nil: "circle"
+        }
+    }
+
+    var toolProgress: Double {
+        switch activeTool {
+        case .hour: desk.timer.crownProgress
+        case nil: 0
         }
     }
 

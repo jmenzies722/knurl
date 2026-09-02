@@ -173,15 +173,24 @@ struct HUDView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
-            CrownDial(state: state)
-            controlBlock
-            talkBar
-            if state.control != .mic {
-                transport
+            if state.activeTool != nil {
+                ToolCrown(state: state)
+                toolBlock
+            } else {
+                CrownDial(state: state)
+                controlBlock
             }
-            librarySources
-            outputRoster
-            hourStrip
+            if state.activeTool == nil {
+                talkBar
+                if state.control != .mic {
+                    transport
+                }
+                librarySources
+                outputRoster
+            } else {
+                toolControls
+            }
+            toolsRow
             roomSatellites
         }
         .padding(18)
@@ -189,54 +198,83 @@ struct HUDView: View {
         .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
     }
 
-    /// The Hour, in the dial menu. Deliberately not a sixth face: the five-face
-    /// grammar, the 1-5 keys and the phone wire format all stay as they are.
-    private var hourStrip: some View {
+    /// One chip per tool. Adding a tool adds a case to DeskTool, not a face.
+    private var toolsRow: some View {
         HStack(spacing: 6) {
-            Image(systemName: "timer")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(state.desk.timer.running ? AnyShapeStyle(DialSwatch.bright) : AnyShapeStyle(.secondary))
-            Text(state.desk.timer.readout)
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .contentTransition(.numericText())
-                .frame(width: 56, alignment: .leading)
-
-            ForEach([15, 25, 50, 90], id: \.self) { minutes in
-                Text("\(minutes)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .frame(width: 32, height: 28)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(ImmediatePress { state.setHourDuration(Double(minutes) * 60) })
-                    .accessibilityLabel("\(minutes) minutes")
-            }
-
-            Spacer(minLength: 4)
-
-            Image(systemName: state.desk.timer.running ? "pause.fill" : "play.fill")
-                .font(.caption.weight(.bold))
-                .frame(width: 34, height: 28)
+            ForEach(DeskTool.allCases) { tool in
+                let active = state.activeTool == tool
+                HStack(spacing: 5) {
+                    Image(systemName: tool.symbol)
+                        .font(.caption.weight(.semibold))
+                        .symbolRenderingMode(.monochrome)
+                    Text(tool == .hour && state.desk.timer.running
+                         ? state.desk.timer.readout
+                         : tool.title)
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .contentTransition(.numericText())
+                }
+                .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .glassEffect(
-                    state.desk.timer.running
-                        ? .regular.tint(DialSwatch.bright.opacity(0.4))
-                        : .regular,
-                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    active ? .regular.tint(tool.tint.opacity(0.4)) : .regular,
+                    in: Capsule()
                 )
-                .overlay(ImmediatePress { state.toggleHour() })
-                .accessibilityLabel(state.desk.timer.running ? "Pause the Hour" : "Start the Hour")
-
-            if state.desk.timer.isArmed {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 28)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(ImmediatePress { state.resetHour() })
-                    .accessibilityLabel("Reset the Hour")
+                .overlay(ImmediatePress {
+                    state.selectTool(active ? nil : tool)
+                })
+                .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+                .accessibilityLabel(tool.title)
             }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.snappy(duration: 0.2), value: state.desk.timer.running)
-        .animation(.snappy(duration: 0.2), value: state.desk.timer.readout)
+        .animation(.snappy(duration: 0.2), value: state.activeTool)
+    }
+
+    private var toolBlock: some View {
+        VStack(spacing: 4) {
+            Text(state.toolReadout)
+                .font(.title3.weight(.semibold).monospacedDigit())
+                .contentTransition(.numericText())
+            Text(state.toolCaption)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var toolControls: some View {
+        switch state.activeTool {
+        case .hour:
+            HStack(spacing: 8) {
+                ForEach([15, 25, 50, 90], id: \.self) { minutes in
+                    let selected = !state.desk.timer.running
+                        && abs(state.desk.timer.duration - Double(minutes) * 60) < 1
+                    Text("\(minutes)")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .frame(width: 40, height: 32)
+                        .glassEffect(
+                            selected ? .regular.tint(DialSwatch.bright.opacity(0.4)) : .regular,
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        )
+                        .overlay(ImmediatePress { state.setHourDuration(Double(minutes) * 60) })
+                        .accessibilityLabel("\(minutes) minutes")
+                }
+                if state.desk.timer.isArmed || state.desk.timer.running {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, height: 32)
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay(ImmediatePress { state.resetHour() })
+                        .accessibilityLabel("Reset the Hour")
+                }
+            }
+        case nil:
+            EmptyView()
+        }
     }
 
     private var header: some View {
@@ -797,5 +835,27 @@ final class MoveBarView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
+    }
+}
+
+
+/// The crown for whichever tool is active. Turn to set, click to run.
+private struct ToolCrown: View {
+    @Bindable var state: DialState
+
+    var body: some View {
+        DeskCrown(
+            progress: state.toolProgress,
+            tint: state.activeTool?.tint ?? DialSwatch.bright,
+            symbol: state.toolSymbol,
+            readout: state.toolReadout,
+            caption: state.toolCaption,
+            ticks: 10,
+            size: 252,
+            lively: state.desk.allowsDecorativeMotion,
+            onTurn: { state.turnTool($0) },
+            onConfirm: { state.confirmTool() }
+        )
+        .frame(maxWidth: .infinity)
     }
 }
