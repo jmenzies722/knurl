@@ -11,13 +11,15 @@ let package = Package(
         .executable(name: "Knurl", targets: ["Knurl"]),
         .library(name: "KnurlCore", targets: ["KnurlCore"]),
         .library(name: "KnurlLink", targets: ["KnurlLink"]),
+        .library(name: "KnurlAgents", targets: ["KnurlAgents"]),
     ],
     targets: [
         .target(name: "KnurlLink"),
         .target(name: "KnurlCore"),
+        .target(name: "KnurlAgents"),
         .executableTarget(
             name: "Knurl",
-            dependencies: ["KnurlCore", "KnurlLink"],
+            dependencies: ["KnurlCore", "KnurlLink", "KnurlAgents"],
             linkerSettings: [
                 .linkedFramework("MusicKit"),
                 .linkedFramework("_MusicKit_SwiftUI"),
@@ -33,6 +35,10 @@ let package = Package(
         .testTarget(
             name: "KnurlCoreTests",
             dependencies: ["KnurlCore", "KnurlLink"]
+        ),
+        .testTarget(
+            name: "KnurlAgentsTests",
+            dependencies: ["KnurlAgents"]
         ),
     ]
 )
