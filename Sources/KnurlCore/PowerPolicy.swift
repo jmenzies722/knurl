@@ -16,7 +16,7 @@ public enum PowerMode: String, CaseIterable, Sendable, Identifiable {
     public var summary: String {
         switch self {
         case .battery:
-            "Quieter motion. Prefer fewer parallel agents."
+            "Quieter Knurl motion."
         case .balanced:
             "Normal development."
         case .performance:

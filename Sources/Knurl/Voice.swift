@@ -65,6 +65,7 @@ final class Voice {
 
     func stop() async {
         generation += 1
+        let token = generation
         wantsListen = false
         guard isListening else { return }
         guard !stopping else { return }
@@ -105,6 +106,7 @@ final class Voice {
         lastTranscript = text
         preview = text
         levels = []
+        guard generation == token else { return }
         paste(text)
     }
 
@@ -272,7 +274,10 @@ final class Voice {
         board.clearContents()
         board.setString(text, forType: .string)
         editor?.activate()
-        postPaste()
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(90))
+            self.postPaste()
+        }
         message = "Copied — ⌘V if it didn’t land"
     }
 

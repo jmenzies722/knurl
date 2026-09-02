@@ -29,7 +29,7 @@ private func knurlHotkeyCallback(
             if released {
                 AppDelegate.shared?.state.endTalk()
             } else {
-                AppDelegate.shared?.state.beginTalk()
+                AppDelegate.shared?.state.beginTalkFromHotkey()
             }
         default:
             if !released { AppDelegate.shared?.state.summon() }

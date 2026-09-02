@@ -51,6 +51,17 @@ public enum DialMath: Sendable {
         return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
 
+    public static func detentIndex(progress: Double, count: Int) -> Int {
+        guard count > 1 else { return 0 }
+        let scaled = clampVolume(progress) * Double(count - 1)
+        return min(count - 1, max(0, Int(scaled.rounded())))
+    }
+
+    public static func detentProgress(index: Int, count: Int) -> Double {
+        guard count > 1 else { return 0.5 }
+        return clampVolume(Double(index) / Double(count - 1))
+    }
+
     public static func sessionClock(_ interval: Double) -> String {
         let total = max(0, Int(interval.rounded()))
         let hours = total / 3600

@@ -29,6 +29,7 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     static let shared = HubWindow()
 
     private var window: HubPanel?
+    private var musicHost: NSHostingView<HubToolbarMusic>?
     private let musicID = NSToolbarItem.Identifier("knurl.music")
     private let settingsID = NSToolbarItem.Identifier("knurl.settings")
 
@@ -39,8 +40,15 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     var isVisible: Bool { window?.isVisible == true }
 
     func attach(_ state: DialState) {
+        let host = NSHostingView(rootView: HubToolbarMusic(state: state))
+        host.setFrameSize(NSSize(width: 208, height: 30))
+        host.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        musicHost = host
         let window = ensure()
         window.contentView = HubHostingView(rootView: HubView(state: state))
+        if let item = window.toolbar?.items.first(where: { $0.itemIdentifier == musicID }) {
+            item.view = host
+        }
     }
 
     func show() {
@@ -87,9 +95,13 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Open Music"
             item.paletteLabel = "Open Music"
-            item.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Open Music")
-            item.target = self
-            item.action = #selector(openMusic)
+            if let musicHost {
+                item.view = musicHost
+            } else {
+                item.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Open Music")
+                item.target = self
+                item.action = #selector(openMusic)
+            }
             return item
         case settingsID:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
@@ -124,13 +136,13 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         created.minSize = NSSize(width: 980, height: 700)
         created.isReleasedWhenClosed = false
         created.titlebarAppearsTransparent = true
-        created.titleVisibility = .visible
+        created.titleVisibility = .hidden
         created.titlebarSeparatorStyle = .none
         created.backgroundColor = NSColor.windowBackgroundColor
         created.delegate = self
         let toolbar = NSToolbar(identifier: NSToolbar.Identifier("KnurlHub"))
         toolbar.delegate = self
-        toolbar.displayMode = .iconAndLabel
+        toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
         created.toolbar = toolbar
         created.toolbarStyle = .unified

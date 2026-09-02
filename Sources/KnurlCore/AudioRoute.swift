@@ -2,7 +2,7 @@
 import CoreAudio
 import Foundation
 
-public enum AudioTransport: String, Sendable, Equatable {
+public enum AudioTransport: String, Sendable, Equatable, Hashable {
     case builtIn
     case bluetooth
     case airPlay
@@ -24,6 +24,18 @@ public enum AudioTransport: String, Sendable, Equatable {
         case .thunderbolt: "Thunderbolt"
         case .virtual: "Virtual"
         case .unknown: "Output"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .builtIn: "laptopcomputer"
+        case .bluetooth: "headphones"
+        case .airPlay: "homepod.fill"
+        case .hdmi, .displayPort: "tv"
+        case .usb, .thunderbolt: "hifispeaker.fill"
+        case .virtual: "waveform"
+        case .unknown: "speaker.wave.2.fill"
         }
     }
 
@@ -61,17 +73,28 @@ public struct AudioOutputs: Sendable {
     public init() {}
 
     public func devices() -> [AudioDevice] {
-        allDeviceIDs().compactMap { id in
-            guard isAlive(id),
-                  canBeDefault(id, scope: kAudioDevicePropertyScopeOutput),
-                  channelCount(id, scope: kAudioDevicePropertyScopeOutput) > 0
-            else { return nil }
-            return AudioDevice(
-                id: id,
-                uid: uid(of: id) ?? "id-\(id)",
-                name: name(of: id) ?? "Output \(id)",
-                transport: AudioTransport.from(transportType(id))
-            )
+        var seen = Set<String>()
+        var list: [AudioDevice] = []
+        for id in allDeviceIDs() {
+            guard let device = outputDevice(id), seen.insert(device.uid).inserted else { continue }
+            list.append(device)
+        }
+        if let current, seen.insert(current.uid).inserted {
+            list.append(current)
+        }
+        return Self.ranked(list)
+    }
+
+    /// Bluetooth and AirPlay first so the Output crown lands on AirPods / HomePods.
+    public static func ranked(_ devices: [AudioDevice]) -> [AudioDevice] {
+        let order: [AudioTransport] = [
+            .bluetooth, .airPlay, .builtIn, .hdmi, .displayPort, .usb, .thunderbolt, .virtual, .unknown,
+        ]
+        return devices.sorted { a, b in
+            let left = order.firstIndex(of: a.transport) ?? order.count
+            let right = order.firstIndex(of: b.transport) ?? order.count
+            if left != right { return left < right }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
         }
     }
 
@@ -86,8 +109,37 @@ public struct AudioOutputs: Sendable {
         )
     }
 
-    public func select(_ id: AudioDeviceID) {
-        setDefault(kAudioHardwarePropertyDefaultOutputDevice, id)
+    @discardableResult
+    public func select(_ device: AudioDevice) -> Bool {
+        select(deviceID(forUID: device.uid) ?? device.id)
+    }
+
+    @discardableResult
+    public func select(_ id: AudioDeviceID) -> Bool {
+        guard id != kAudioObjectUnknown else { return false }
+        let outputOK = setDefault(kAudioHardwarePropertyDefaultOutputDevice, id)
+        let systemOK = setDefault(kAudioHardwarePropertyDefaultSystemOutputDevice, id)
+        return (outputOK || systemOK) && defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == id
+    }
+
+    private func outputDevice(_ id: AudioDeviceID) -> AudioDevice? {
+        guard isAlive(id), channelCount(id, scope: kAudioDevicePropertyScopeOutput) > 0 else {
+            return nil
+        }
+        let transport = AudioTransport.from(transportType(id))
+        if transport == .virtual { return nil }
+        let defaultable =
+            canBeDefault(id, scope: kAudioDevicePropertyScopeOutput)
+            || canBeDefaultSystem(id)
+        if !defaultable, transport != .bluetooth, transport != .airPlay {
+            return nil
+        }
+        return AudioDevice(
+            id: id,
+            uid: uid(of: id) ?? "id-\(id)",
+            name: name(of: id) ?? "Output \(id)",
+            transport: transport
+        )
     }
 
     public func cycle(by delta: Int) {
@@ -97,7 +149,7 @@ public struct AudioOutputs: Sendable {
         let index = list.firstIndex(where: { $0.id == currentID }) ?? 0
         let count = list.count
         let next = ((index + delta) % count + count) % count
-        select(list[next].id)
+        select(list[next])
     }
 }
 
@@ -282,7 +334,8 @@ private func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioDevi
     return status == noErr ? device : kAudioObjectUnknown
 }
 
-private func setDefault(_ selector: AudioObjectPropertySelector, _ device: AudioDeviceID) {
+@discardableResult
+private func setDefault(_ selector: AudioObjectPropertySelector, _ device: AudioDeviceID) -> Bool {
     var next = device
     let size = UInt32(MemoryLayout<AudioDeviceID>.size)
     var address = AudioObjectPropertyAddress(
@@ -290,14 +343,37 @@ private func setDefault(_ selector: AudioObjectPropertySelector, _ device: Audio
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    AudioObjectSetPropertyData(
+    return AudioObjectSetPropertyData(
         AudioObjectID(kAudioObjectSystemObject),
         &address,
         0,
         nil,
         size,
         &next
+    ) == noErr
+}
+
+private func deviceID(forUID uid: String) -> AudioDeviceID? {
+    var identifier = uid as CFString
+    var id = AudioDeviceID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
     )
+    let status = withUnsafePointer(to: &identifier) { qualifier in
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            UInt32(MemoryLayout<CFString>.size),
+            qualifier,
+            &size,
+            &id
+        )
+    }
+    guard status == noErr, id != kAudioObjectUnknown else { return nil }
+    return id
 }
 
 private func allDeviceIDs() -> [AudioDeviceID] {
@@ -360,6 +436,14 @@ private func isAlive(_ id: AudioDeviceID) -> Bool {
 
 private func canBeDefault(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> Bool {
     uintProperty(id, kAudioDevicePropertyDeviceCanBeDefaultDevice, scope: scope) == 1
+}
+
+private func canBeDefaultSystem(_ id: AudioDeviceID) -> Bool {
+    uintProperty(
+        id,
+        kAudioDevicePropertyDeviceCanBeDefaultSystemDevice,
+        scope: kAudioDevicePropertyScopeOutput
+    ) == 1
 }
 
 private func uintProperty(

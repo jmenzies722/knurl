@@ -9,7 +9,7 @@ final class NotchChipPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func cancelOperation(_ sender: Any?) {
-        AppDelegate.shared?.state.collapseNotch()
+        AppDelegate.shared?.state.escapeNotch()
     }
 }
 
@@ -19,6 +19,10 @@ final class NotchPanel {
 
     private var panel: NotchChipPanel?
     private var observer: Any?
+    private var escapeLocal: Any?
+    private var escapeGlobal: Any?
+
+    var hasHousing: Bool { notchedScreen() != nil }
 
     private init() {}
 
@@ -34,7 +38,9 @@ final class NotchPanel {
             ) { _ in
                 Task { @MainActor in
                     if AppDelegate.shared?.state.isNotchExpanded == true {
-                        NotchPanel.shared.expand()
+                        NotchPanel.shared.expand(
+                            flow: AppDelegate.shared?.state.voice.isActive == true
+                        )
                     } else {
                         NotchPanel.shared.collapse()
                     }
@@ -43,23 +49,24 @@ final class NotchPanel {
         }
     }
 
-    func expand() {
+    func expand(flow: Bool = false) {
         guard let screen = notchedScreen(),
               let housing = housing(on: screen)
         else {
+            ignoreEscape()
             panel?.orderOut(nil)
             return
         }
         let panel = ensure()
         panel.isOpaque = false
         panel.backgroundColor = .clear
+        let frame = expandedFrame(housing: housing, visible: screen.visibleFrame, flow: flow)
+        AppDelegate.shared?.state.notchHousing = housing
+        AppDelegate.shared?.state.notchExpanded = frame
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.38
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(
-                NotchMath.expandedFrame(housing: housing, visible: screen.visibleFrame),
-                display: true
-            )
+            panel.animator().setFrame(frame, display: true)
         }
         panel.orderFront(nil)
     }
@@ -68,11 +75,15 @@ final class NotchPanel {
         guard let screen = notchedScreen(),
               let housing = housing(on: screen)
         else {
+            ignoreEscape()
             panel?.orderOut(nil)
             return
         }
         let panel = ensure()
         panel.resignKey()
+        ignoreEscape()
+        AppDelegate.shared?.state.notchHousing = housing
+        AppDelegate.shared?.state.notchExpanded = housing
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.28
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -84,6 +95,40 @@ final class NotchPanel {
             }
         }
         panel.orderFront(nil)
+    }
+
+    func watchFlowEscape() {
+        guard escapeLocal == nil else { return }
+        escapeLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53, AppDelegate.shared?.state.voice.isActive == true else {
+                return event
+            }
+            AppDelegate.shared?.state.escapeNotch()
+            return nil
+        }
+        escapeGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53 else { return }
+            Task { @MainActor in
+                guard AppDelegate.shared?.state.voice.isActive == true else { return }
+                AppDelegate.shared?.state.escapeNotch()
+            }
+        }
+    }
+
+    func ignoreEscape() {
+        if let escapeLocal {
+            NSEvent.removeMonitor(escapeLocal)
+            self.escapeLocal = nil
+        }
+        if let escapeGlobal {
+            NSEvent.removeMonitor(escapeGlobal)
+            self.escapeGlobal = nil
+        }
+    }
+
+    private func expandedFrame(housing: CGRect, visible: CGRect, flow: Bool) -> CGRect {
+        let shelf = flow ? NotchMath.flowShelfHeight : NotchMath.shelfHeight
+        return NotchMath.expandedFrame(housing: housing, visible: visible, shelf: shelf)
     }
 
     private func housing(on screen: NSScreen) -> CGRect? {

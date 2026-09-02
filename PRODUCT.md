@@ -1,20 +1,20 @@
 # Knurl
 
-The workstation layer for agentic engineering on macOS.
+The live powerhouse desk for Mac developers.
 
-The coding harness does the coding. Knurl runs the desk: project,
-agents, windows, voice, hardware, and the human-attention loop.
+Cursor, Xcode, and the terminal do the work. Knurl runs the room —
+music, volume, brightness, speakers, mic, Flow, windows, and power —
+so the hour stays fun and the Mac stays fast.
 
-> Run your agents. Control your Mac. Stay in flow.
+> Have fun. Ship. Stay in the room.
 
 > Five faces. Three surfaces. Six Hub pages. One Context Engine.
 
-> Surface exceptions, not activity.
+> Live desk first. Pings only when they are real.
 
-Someone buys Knurl to stay in Cursor, Xcode, Claude Code, or Codex
-while Knurl handles the room — Music, volume, brightness, output, mic,
-Knurl Flow, windows, power, and one quiet cue when an agent needs a
-human.
+Someone buys Knurl to enjoy the Mac while they build: a Hub hall,
+a side dial, a notch whisper, and one quiet cue if a tool actually
+needs a human. Not a chatbot. Not an agent dashboard.
 
 Knurl is not an IDE, chatbot, coding agent, terminal, Git client,
 PR board, Raycast clone, or Control Center clone.
@@ -55,7 +55,7 @@ Knurl Flow. Escape parks the HUD.
 
 ## Three surfaces
 
-1. **Hub** — titled Mac window with a six-page sidebar: Home, Agents,
+1. **Hub** — titled Mac window with a six-page sidebar: Home, Tools,
    Workspace, Flow, System, Sessions. Dock, ⌘-tab, Open Knurl. Cold
    start parked. Close does not quit.
 2. **Side dial** — physical input for the five faces. Contextual
@@ -66,7 +66,11 @@ Knurl Flow. Escape parks the HUD.
 
 ## Hub pages
 
-Home · Agents · Workspace · Flow · System · Sessions
+Home · Tools · Workspace · Flow · System · Sessions
+
+Home is the live room dashboard: five face tiles (tap to land the
+dial), the crown that follows the current face, and Feel chips for
+tick and haptic. Tools is Hour, dim the room, swap speakers, and Flow.
 
 Six is enough. Do not grow a seventeenth item.
 
@@ -86,10 +90,11 @@ Unlabeled simulator rows are a bug.
 
 ## Knurl Flow
 
-Hold or toggle → speak → release → paste into the remembered
-non-Knurl app. On-device `SpeechAnalyzer` + `DictationTranscriber`.
-Always show the destination. When an agent is waiting, words land
-there — never silently.
+Hold ⌃⌥M → speak in the notch → release → paste into the
+remembered app. On a notched Mac this is a housing detent, not the
+side dial. Black chip while listening; glass shelf drops for levels,
+words, destination, Hold / Release / Cancel. On-device
+`SpeechAnalyzer` + `DictationTranscriber`. Always show the destination.
 
 ## Window Manager
 

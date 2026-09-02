@@ -22,19 +22,33 @@ final class ImmediateHoldView: NSView {
     var down: () -> Void = {}
     var up: () -> Void = {}
     private var held = false
+    private var monitor: Any?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
+        finishIfNeeded()
         held = true
         down()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+            self?.finishIfNeeded()
+            return event
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
+        finishIfNeeded()
+    }
+
+    private func finishIfNeeded() {
         guard held else { return }
         held = false
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
         up()
     }
 

@@ -64,6 +64,8 @@ public enum SessionEventKind: String, Codable, Sendable {
     case thermal
     case workspaceApplied
     case agent
+    case timerStarted
+    case timerEnded
 }
 
 public struct DeskReceipt: Identifiable, Codable, Sendable, Equatable {
@@ -133,6 +135,7 @@ public struct AgentSession: Identifiable, Codable, Sendable, Equatable {
 
 public enum NotchWhisper: Equatable, Sendable {
     case flow(destination: String)
+    case timer(remaining: String)
     case attention(name: String)
     case power(percent: Int, mode: String)
     case workspace(preset: String)
@@ -142,19 +145,31 @@ public enum NotchWhisper: Equatable, Sendable {
 
     public var line: String {
         switch self {
-        case .flow: "Knurl Flow"
-        case .attention(let name): "\(name) needs you"
-        case .power(let percent, let mode): "\(percent)% · \(mode)"
-        case .workspace(let preset): preset
-        case .music(let title): title
-        case .session(let elapsed): "Flow · \(elapsed)"
-        case .parked: "Knurl"
+        case .flow(let destination):
+            let name = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty || name.count > 16 { return "Listening…" }
+            return "→ \(name)"
+        case .timer(let remaining):
+            return remaining
+        case .attention(let name):
+            return "\(name) needs you"
+        case .power(let percent, let mode):
+            return "\(percent)% · \(mode)"
+        case .workspace(let preset):
+            return preset
+        case .music(let title):
+            return title
+        case .session(let elapsed):
+            return "Flow · \(elapsed)"
+        case .parked:
+            return "Knurl"
         }
     }
 
     public var detail: String {
         switch self {
         case .flow(let destination): "→ \(destination)"
+        case .timer: "Hour"
         case .attention: "Hold to respond"
         case .power: "Battery Coding"
         case .workspace: "Workspace"
@@ -173,9 +188,11 @@ public enum NotchWhisper: Equatable, Sendable {
         powerMode: String,
         workspaceFlash: String?,
         musicTitle: String?,
-        elapsed: String
+        elapsed: String,
+        timerRemaining: String? = nil
     ) -> NotchWhisper {
         if listening { return .flow(destination: destination) }
+        if let timerRemaining { return .timer(remaining: timerRemaining) }
         if let attention { return .attention(name: attention) }
         if thermalException, let batteryPercent {
             return .power(percent: batteryPercent, mode: powerMode)

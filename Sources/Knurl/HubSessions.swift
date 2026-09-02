@@ -4,24 +4,26 @@ import SwiftUI
 struct HubSessions: View {
     @Bindable var state: DialState
     @State private var selected: DeskReceipt.ID?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HubPageScroll {
-            Text("Sessions")
-                .font(.largeTitle.weight(.semibold))
-            Text("What this Mac actually recorded.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                HubSection(title: "This session", accessory: DialMath.sessionClock(timeline.date.timeIntervalSince(state.desk.startedAt))) {
-                    HubFact(label: "Harness", value: state.harnessName)
-                    HubFact(label: "Agents", value: "\(state.desk.sessions.count)")
-                    HubFact(label: "Flow", value: "\(state.desk.flowUses) uses")
-                    HubFact(label: "Music", value: state.music.hasTrack ? state.music.title : "—")
-                    HubFact(label: "Battery", value: state.desk.power.snapshot.percentLabel)
-                    HubFact(label: "Thermal", value: state.desk.power.snapshot.thermal.title)
+                HubHallHeader(title: "Sessions", whisper: "This hour on this Mac.") {
+                    HubHallMetric(
+                        value: DialMath.sessionClock(timeline.date.timeIntervalSince(state.desk.startedAt)),
+                        lively: state.desk.allowsDecorativeMotion && !reduceMotion
+                    )
                 }
+            }
+
+            HubSection(title: "This session") {
+                HubFact(label: "Harness", value: state.harnessName)
+                HubFact(label: "Hour", value: state.desk.timer.running ? state.desk.timer.readout : "—")
+                HubFact(label: "Flow", value: "\(state.desk.flowUses) uses")
+                HubFact(label: "Music", value: state.music.hasTrack ? state.music.title : "—")
+                HubFact(label: "Battery", value: state.desk.power.snapshot.percentLabel)
+                HubFact(label: "Thermal", value: state.desk.power.snapshot.thermal.title)
             }
 
             HubDivider()

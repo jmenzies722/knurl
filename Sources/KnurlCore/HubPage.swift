@@ -1,6 +1,6 @@
 public enum HubPage: String, CaseIterable, Sendable, Identifiable, Hashable {
     case home
-    case agents
+    case tools
     case workspace
     case flow
     case system
@@ -11,7 +11,7 @@ public enum HubPage: String, CaseIterable, Sendable, Identifiable, Hashable {
     public var title: String {
         switch self {
         case .home: "Home"
-        case .agents: "Agents"
+        case .tools: "Tools"
         case .workspace: "Workspace"
         case .flow: "Flow"
         case .system: "System"
@@ -22,7 +22,7 @@ public enum HubPage: String, CaseIterable, Sendable, Identifiable, Hashable {
     public var symbol: String {
         switch self {
         case .home: "house.fill"
-        case .agents: "circle.hexagongrid.fill"
+        case .tools: "timer"
         case .workspace: "rectangle.split.2x2.fill"
         case .flow: "waveform"
         case .system: "slider.horizontal.3"

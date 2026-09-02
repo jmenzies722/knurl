@@ -33,6 +33,8 @@ struct SettingsView: View {
             Section("Desk") {
                 Text("1–5 switch faces. Turn for level. Click to confirm. \(HotkeyCenter.shared.chord) is the dial. Closing the Hub does not quit.")
                     .foregroundStyle(.secondary)
+                Text("The menu bar is a live island — music, Hour, and Flow. Click it for the shelf. Right-click for Hub and Quit.")
+                    .foregroundStyle(.secondary)
                 Picker("Power", selection: Binding(
                     get: { state.desk.powerMode },
                     set: { state.desk.powerMode = $0 }
@@ -57,18 +59,16 @@ struct SettingsView: View {
                 Text("Hold \(HotkeyCenter.shared.talkChord). Speech stays on this Mac. Words land in \(state.harnessName).")
                     .foregroundStyle(.secondary)
             }
-            Section("Agents") {
-                labeled("Cursor", "Not configured")
-                labeled("Claude Code", "Not configured")
-                labeled("Codex", "Not configured")
-                labeled("Xcode", "Limited support")
+            Section("Tools") {
+                Text("Hour lives on Tools. Turn the crown for minutes, click to start. The notch keeps the remaining time. Dim the room drops brightness and remembers where you were.")
+                    .foregroundStyle(.secondary)
             }
             Section("Privacy") {
-                Text("Knurl does not record your screen, monitor your keyboard, or send your source code to a cloud AI service. Accessibility is used only after you enable Window Manager. Agent hooks, when installed, send local lifecycle events only.")
+                Text("Knurl does not record your screen, monitor your keyboard, or send your source code to a cloud AI service. Accessibility is used only after you enable Window Manager.")
                     .foregroundStyle(.secondary)
             }
             Section("About") {
-                Text("Knurl is the workstation layer for agentic engineering on macOS. The harness does the coding.")
+                Text("Knurl runs the room — music, volume, brightness, speakers, mic, Flow, windows, Hour.")
                     .foregroundStyle(.secondary)
                 Text(CrownServer.shared.ready
                      ? "iPhone crown is on the local network."
@@ -78,15 +78,5 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 460, minHeight: 520)
-    }
-
-    private func labeled(_ name: String, _ status: String) -> some View {
-        HStack {
-            Text(name)
-            Spacer()
-            Text(status)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
     }
 }

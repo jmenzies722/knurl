@@ -128,11 +128,54 @@ enum MusicApp {
         )
     }
 
-    private static func cleanGenre(_ raw: String) -> String {
+    static func cleanGenre(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { return "" }
         if text.lowercased() == "missing value" { return "" }
         return text
+    }
+
+    static func recentGenres() -> [String] {
+        guard isOpen else { return [] }
+        let source = """
+        tell application "Music"
+            try
+                if exists user playlist "Recently Played" then
+                    return genre of every track of user playlist "Recently Played"
+                end if
+            end try
+            return {}
+        end tell
+        """
+        guard let desc = runDescriptor(source) else { return [] }
+        var names: [String] = []
+        var seen = Set<String>()
+        func add(_ raw: String) {
+            let name = cleanGenre(raw)
+            guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { return }
+            names.append(name)
+        }
+        if desc.numberOfItems > 0 {
+            for index in 1 ... desc.numberOfItems {
+                if let name = desc.atIndex(index)?.stringValue { add(name) }
+            }
+        } else if let name = desc.stringValue {
+            add(name)
+        }
+        return names
+    }
+
+    static func playGenre(_ name: String) -> Bool {
+        let source = """
+        tell application "Music"
+            try
+                play (every track of library playlist 1 whose genre is \(quote(name)))
+            on error
+                play (every file track whose genre is \(quote(name)))
+            end try
+        end tell
+        """
+        return runDescriptor(source) != nil
     }
 
     static func artwork() -> NSImage? {

@@ -17,6 +17,11 @@ struct DeskWindow: Identifiable, Equatable {
     var title: String
     var frame: CGRect
     var displayID: String
+    fileprivate var element: AXUIElement
+
+    static func == (lhs: DeskWindow, rhs: DeskWindow) -> Bool {
+        lhs.id == rhs.id && lhs.frame == rhs.frame && lhs.title == rhs.title
+    }
 }
 
 @MainActor
@@ -26,7 +31,7 @@ final class WindowCatalog {
     private(set) var trusted = AXIsProcessTrusted()
     private(set) var displays: [DeskDisplay] = []
     private(set) var windows: [DeskWindow] = []
-    private(set) var lastArrangement: [String: CGRect] = [:]
+    private var lastArrangement: [(element: AXUIElement, frame: CGRect)] = []
     private(set) var lastPreset: WorkspacePreset?
     var selectedID: String?
     var status: String?
@@ -75,8 +80,8 @@ final class WindowCatalog {
             windows = []
             return
         }
-        windows = Self.scan(displays: displays)
-        if selectedID == nil {
+        windows = Self.scan(displays: displays, primaryHeight: Self.primaryHeight)
+        if selectedID == nil || windows.contains(where: { $0.id == selectedID }) == false {
             selectedID = windows.first?.id
         }
     }
@@ -84,7 +89,7 @@ final class WindowCatalog {
     func move(_ id: String, to frame: CGRect) {
         guard enabled, trusted, let window = windows.first(where: { $0.id == id }) else { return }
         rememberIfNeeded()
-        Self.apply(pid: window.pid, title: window.title, frame: frame)
+        Self.setFrame(window.element, appKit: frame, primaryHeight: Self.primaryHeight)
         if let index = windows.firstIndex(where: { $0.id == id }) {
             windows[index].frame = frame
             windows[index].displayID = displayID(containing: frame)
@@ -99,14 +104,16 @@ final class WindowCatalog {
 
     func apply(_ preset: WorkspacePreset, on display: DeskDisplay? = nil) {
         refresh()
-        let target = display ?? displays.first
+        let target = display
+            ?? self.display(for: selected)
+            ?? self.display(for: windows.first)
+            ?? displays.first
         guard let target else { return }
         rememberIfNeeded()
-        let candidates = windows.filter { $0.displayID == target.id }
-        let ordered = candidates.isEmpty ? windows : candidates
+        let ordered = orderedWindows(on: target)
         let frames = WorkspaceMath.frames(for: preset, visible: target.visible, count: ordered.count)
         for (window, frame) in zip(ordered, frames) where frame != .null {
-            Self.apply(pid: window.pid, title: window.title, frame: frame)
+            Self.setFrame(window.element, appKit: frame, primaryHeight: Self.primaryHeight)
         }
         lastPreset = preset
         refresh()
@@ -114,10 +121,8 @@ final class WindowCatalog {
 
     func restore() {
         guard !lastArrangement.isEmpty else { return }
-        for window in windows {
-            if let frame = lastArrangement[window.id] {
-                Self.apply(pid: window.pid, title: window.title, frame: frame)
-            }
+        for item in lastArrangement {
+            Self.setFrame(item.element, appKit: item.frame, primaryHeight: Self.primaryHeight)
         }
         lastPreset = nil
         refresh()
@@ -137,13 +142,23 @@ final class WindowCatalog {
         windows.first { $0.id == selectedID } ?? windows.first
     }
 
-    func display(for window: DeskWindow) -> DeskDisplay? {
-        displays.first { $0.id == window.displayID } ?? displays.first
+    func display(for window: DeskWindow?) -> DeskDisplay? {
+        guard let window else { return nil }
+        return displays.first { $0.id == window.displayID } ?? displays.first
+    }
+
+    private func orderedWindows(on display: DeskDisplay) -> [DeskWindow] {
+        var pool = windows.filter { $0.displayID == display.id }
+        if pool.isEmpty { pool = windows }
+        if let selected, let index = pool.firstIndex(where: { $0.id == selected.id }) {
+            pool.move(fromOffsets: IndexSet(integer: index), toOffset: 0)
+        }
+        return pool
     }
 
     private func rememberIfNeeded() {
         if lastArrangement.isEmpty {
-            lastArrangement = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0.frame) })
+            lastArrangement = windows.map { ($0.element, $0.frame) }
         }
     }
 
@@ -154,32 +169,45 @@ final class WindowCatalog {
             ?? "display-0"
     }
 
-    private static func scan(displays: [DeskDisplay]) -> [DeskWindow] {
+    private static var primaryHeight: CGFloat {
+        NSScreen.screens.first?.frame.height ?? 0
+    }
+
+    private static func scan(displays: [DeskDisplay], primaryHeight: CGFloat) -> [DeskWindow] {
         var result: [DeskWindow] = []
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && !$0.isTerminated }
+            .filter { $0.activationPolicy == .regular && !$0.isTerminated && $0.processIdentifier != selfPID }
+            .sorted { lhs, rhs in
+                if lhs.processIdentifier == frontPID { return true }
+                if rhs.processIdentifier == frontPID { return false }
+                return (lhs.localizedName ?? "") < (rhs.localizedName ?? "")
+            }
         for app in apps {
             let element = AXUIElementCreateApplication(app.processIdentifier)
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
-                  let windows = value as? [AXUIElement]
+                  let axWindows = value as? [AXUIElement]
             else { continue }
-            for (index, window) in windows.enumerated() {
+            for window in axWindows {
                 guard isStandard(window),
-                      let frame = frame(of: window)
+                      let axFrame = axFrame(of: window)
                 else { continue }
+                let frame = WorkspaceMath.appKitFrame(from: axFrame, primaryHeight: primaryHeight)
                 let title = string(window, kAXTitleAttribute as CFString) ?? ""
                 let point = CGPoint(x: frame.midX, y: frame.midY)
                 let display = displays.first { $0.visible.contains(point) || $0.frame.contains(point) }
                     ?? displays.first
                 result.append(
                     DeskWindow(
-                        id: "\(app.processIdentifier).\(index).\(title)",
+                        id: identity(pid: app.processIdentifier, element: window),
                         pid: app.processIdentifier,
                         appName: app.localizedName ?? "App",
                         title: title.isEmpty ? (app.localizedName ?? "Window") : title,
                         frame: frame,
-                        displayID: display?.id ?? "display-0"
+                        displayID: display?.id ?? "display-0",
+                        element: window
                     )
                 )
             }
@@ -187,23 +215,25 @@ final class WindowCatalog {
         return result
     }
 
-    private static func apply(pid: pid_t, title: String, frame: CGRect) {
-        let app = AXUIElementCreateApplication(pid)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement]
-        else { return }
-        let match = windows.first { string($0, kAXTitleAttribute as CFString) == title } ?? windows.first
-        guard let match else { return }
-        var origin = frame.origin
-        var size = frame.size
+    private static func setFrame(_ element: AXUIElement, appKit: CGRect, primaryHeight: CGFloat) {
+        let ax = WorkspaceMath.axFrame(from: appKit, primaryHeight: primaryHeight)
+        var origin = ax.origin
+        var size = ax.size
         if let position = AXValueCreate(.cgPoint, &origin) {
-            AXUIElementSetAttributeValue(match, kAXPositionAttribute as CFString, position)
+            AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, position)
         }
         if let axSize = AXValueCreate(.cgSize, &size) {
-            AXUIElementSetAttributeValue(match, kAXSizeAttribute as CFString, axSize)
+            AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, axSize)
         }
-        AXUIElementPerformAction(match, kAXRaiseAction as CFString)
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+
+    private static func identity(pid: pid_t, element: AXUIElement) -> String {
+        if let identifier = string(element, kAXIdentifierAttribute as CFString), !identifier.isEmpty {
+            return "\(pid).id.\(identifier)"
+        }
+        let pointer = Unmanaged.passUnretained(element).toOpaque()
+        return "\(pid).ax.\(Int(bitPattern: pointer))"
     }
 
     private static func isStandard(_ window: AXUIElement) -> Bool {
@@ -215,7 +245,7 @@ final class WindowCatalog {
         return true
     }
 
-    private static func frame(of window: AXUIElement) -> CGRect? {
+    private static func axFrame(of window: AXUIElement) -> CGRect? {
         var positionRef: CFTypeRef?
         var sizeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
@@ -225,8 +255,10 @@ final class WindowCatalog {
         else { return nil }
         var origin = CGPoint.zero
         var size = CGSize.zero
-        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
-              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        let position = unsafeBitCast(positionValue, to: AXValue.self)
+        let axSize = unsafeBitCast(sizeValue, to: AXValue.self)
+        guard AXValueGetValue(position, .cgPoint, &origin),
+              AXValueGetValue(axSize, .cgSize, &size)
         else { return nil }
         return CGRect(origin: origin, size: size)
     }

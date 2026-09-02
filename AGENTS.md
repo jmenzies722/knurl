@@ -2,12 +2,14 @@
 
 Product: `PRODUCT.md`. Architecture: `docs/KNURL_SESSION_LAYER_PLAN.md`.
 
-The harness does the coding. Knurl runs the desk and the
-human-attention loop. Five faces. Three surfaces. Six Hub pages.
-One Context Engine. Never a sixth face. Agent UI is Pulse /
-Attention / Receipts — not a dial mode.
+Knurl is the live desk for Mac developers. The editor
+does the work. Knurl runs the room. Five faces. Three surfaces.
+Six Hub pages (Home, Tools, Workspace, Flow, System, Sessions).
+One Context Engine. Never a sixth face. Tools is Hour and the room
+— not an agent dashboard. Agent UI is Pulse / Attention / Receipts
+when those pings are real.
 
-Engineer workstation for the Mac — a Tahoe Hub with a sidebar, a
+Fun Mac desk — a Tahoe Hub with a sidebar, a
 side dial, and a notch glance that sits in the black camera housing
 on notched Macs (M1 14/16-inch and later). The notch is its own
 feature: click it to drop a glass shelf from the housing, not the
@@ -28,7 +30,8 @@ MediaRemote, SystemMusicPlayer (unavailable on macOS), SkyLight, Polar,
 Input Monitoring, Screen Recording, keystroke storage, and screenshots
 are not.
 
-Flow lives on Mic. Hold Flow or ⌃⌥M. `SpeechAnalyzer` +
+Flow lives on Mic and in the notch. Hold Flow or ⌃⌥M. On a notched
+Mac the housing is the detent — do not pop the HUD. `SpeechAnalyzer` +
 `DictationTranscriber` on-device. Text goes to the clipboard and one
 synthetic ⌘V. No AI rewrite, no cloud Whisper, no always-on mic, no
 sixth face.

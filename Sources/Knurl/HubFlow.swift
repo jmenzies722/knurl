@@ -3,14 +3,16 @@ import SwiftUI
 
 struct HubFlow: View {
     @Bindable var state: DialState
+    @Namespace private var flow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HubPageScroll {
-            Text("Knurl Flow")
-                .font(.largeTitle.weight(.semibold))
-            Text("Speak. Words land where you were.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            HubHallHeader(title: "Knurl Flow", whisper: "Talk it in. Keep building.") {
+                Text("→ \(state.harnessName)")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
 
             VStack(spacing: 18) {
                 FlowWaveform(
@@ -24,44 +26,49 @@ struct HubFlow: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(state.voice.isListening ? .primary : .secondary)
-
-                Text("→ \(state.harnessName)")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 28)
+            .padding(.vertical, 20)
             .frame(maxWidth: .infinity)
 
-            HStack(spacing: 10) {
-                HubGlassButton(
-                    title: state.voice.isListening ? "Release" : "Hold",
-                    symbol: state.voice.isListening ? "waveform" : "mic.fill",
-                    tint: HubTint.face(.mic, progress: 0.6, muted: false),
-                    selected: state.voice.isListening
-                ) {}
-                .overlay(
-                    ImmediateHold(
-                        down: { state.beginTalk(presentHUD: false) },
-                        up: { state.endTalk() }
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    HubGlassButton(
+                        title: state.voice.isListening ? "Release" : "Hold",
+                        symbol: state.voice.isListening ? "waveform" : "mic.fill",
+                        tint: HubTint.face(.mic, progress: 0.6, muted: false),
+                        selected: state.voice.isListening
+                    ) {}
+                    .overlay(
+                        ImmediateHold(
+                            down: { state.beginTalk(presentHUD: false) },
+                            up: { state.endTalk() }
+                        )
                     )
-                )
-                HubGlassButton(
-                    title: state.voice.isListening ? "Stop" : "Toggle",
-                    symbol: "record.circle"
-                ) {
-                    state.toggleTalk(presentHUD: false)
-                }
-                if state.voice.isListening {
-                    HubGlassButton(title: "Cancel", symbol: "xmark") {
-                        state.cancelTalk()
+                    .glassEffectID("flow-hold", in: flow)
+
+                    HubGlassButton(
+                        title: state.voice.isListening ? "Stop" : "Toggle",
+                        symbol: "record.circle"
+                    ) {
+                        state.toggleTalk(presentHUD: false)
                     }
-                }
-                if !state.voice.lastTranscript.isEmpty, !state.voice.isListening {
-                    HubGlassButton(title: "Resend", symbol: "arrow.uturn.up") {
-                        state.resendTalk()
+                    .glassEffectID("flow-toggle", in: flow)
+
+                    if state.voice.isListening {
+                        HubGlassButton(title: "Cancel", symbol: "xmark") {
+                            state.cancelTalk()
+                        }
+                        .glassEffectID("flow-cancel", in: flow)
+                    }
+                    if !state.voice.lastTranscript.isEmpty, !state.voice.isListening {
+                        HubGlassButton(title: "Resend", symbol: "arrow.uturn.up") {
+                            state.resendTalk()
+                        }
+                        .glassEffectID("flow-resend", in: flow)
                     }
                 }
             }
+            .animation(motion, value: state.voice.isListening)
 
             if let message = state.voice.message {
                 Text(message)
@@ -102,6 +109,10 @@ struct HubFlow: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private var motion: Animation? {
+        HubMotion.lively(reduceMotion: reduceMotion, allowed: state.desk.allowsDecorativeMotion)
     }
 
     private var liveLine: String {

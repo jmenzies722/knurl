@@ -134,6 +134,25 @@ public enum WorkspaceMath: Sendable {
         }
     }
 
+    /// AppKit (bottom-left) ↔ Accessibility (top-left of the primary display).
+    public static func axFrame(from appKit: CGRect, primaryHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: appKit.minX,
+            y: primaryHeight - appKit.maxY,
+            width: appKit.width,
+            height: appKit.height
+        )
+    }
+
+    public static func appKitFrame(from ax: CGRect, primaryHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: ax.minX,
+            y: primaryHeight - ax.maxY,
+            width: ax.width,
+            height: ax.height
+        )
+    }
+
     public static func displayContaining(_ point: CGPoint, screens: [CGRect]) -> CGRect? {
         screens.first { $0.contains(point) } ?? screens.first { $0.intersects(CGRect(origin: point, size: CGSize(width: 1, height: 1))) }
     }

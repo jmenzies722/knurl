@@ -34,12 +34,20 @@ import Testing
         let housed = NotchMath.housingInExpanded(housing: housing, expanded: expanded)
         #expect(housed.height == housing.height)
         #expect(housed.width == housing.width)
+        let flow = NotchMath.expandedFrame(
+            housing: housing,
+            visible: visible,
+            shelf: NotchMath.flowShelfHeight
+        )
+        #expect(flow.maxY == housing.maxY)
+        #expect(flow.height > expanded.height)
+        #expect(flow.height - housing.height == NotchMath.shelfGap + NotchMath.flowShelfHeight)
     }
 }
 
 @Test func sixHubPagesAreTheWorkstation() {
     #expect(HubPage.allCases.map(\.title) == [
-        "Home", "Agents", "Workspace", "Flow", "System", "Sessions",
+        "Home", "Tools", "Workspace", "Flow", "System", "Sessions",
     ])
 }
 
@@ -55,6 +63,71 @@ import Testing
     let review = WorkspaceMath.frames(for: .review, visible: visible, count: 3)
     #expect(review[2].minY == visible.minY)
     #expect(review[0].maxY == visible.maxY)
+}
+
+@Test func deskTimerCountsDownAndFinishes() {
+    var timer = DeskTimer(duration: 90, remaining: 90)
+    #expect(abs(timer.crownProgress - 90 / DeskTimer.maxDuration) < 0.001)
+    timer.start(at: Date(timeIntervalSince1970: 0))
+    #expect(timer.running)
+    #expect(timer.whisper == "01:30")
+    let finished = timer.tick(now: Date(timeIntervalSince1970: 90))
+    #expect(finished)
+    #expect(!timer.running)
+    #expect(timer.whisper == nil)
+    var live = DeskTimer(duration: 60, remaining: 60)
+    live.start(at: Date(timeIntervalSince1970: 10))
+    let draggedOff = live.setCrown(0, now: Date(timeIntervalSince1970: 20))
+    #expect(draggedOff)
+    #expect(!live.running)
+    var paused = DeskTimer(duration: 50 * 60, remaining: 50 * 60)
+    paused.start(at: Date(timeIntervalSince1970: 0))
+    let mid = paused.pause(at: Date(timeIntervalSince1970: 20 * 60))
+    #expect(!mid)
+    #expect(paused.isArmed)
+    #expect(abs(paused.crownProgress - 0.6) < 0.01)
+    let nudged = paused.setCrown(0.4, now: Date(timeIntervalSince1970: 20 * 60))
+    #expect(!nudged)
+    #expect(abs(paused.remaining - 20 * 60) < 0.5)
+    var expired = DeskTimer(duration: 60, remaining: 60)
+    expired.start(at: Date(timeIntervalSince1970: 0))
+    let timedOut = expired.pause(at: Date(timeIntervalSince1970: 60))
+    #expect(timedOut)
+}
+
+@Test func notchWhisperPrefersFlowOverTimerAndMusic() {
+    let whisper = NotchWhisper.pick(
+        listening: true,
+        destination: "Cursor",
+        attention: "Claude Code",
+        thermalException: false,
+        batteryPercent: 71,
+        powerMode: "Balanced",
+        workspaceFlash: nil,
+        musicTitle: "Let It Happen",
+        elapsed: "01:12",
+        timerRemaining: "24:10"
+    )
+    #expect(whisper == .flow(destination: "Cursor"))
+    #expect(whisper.line == "→ Cursor")
+    #expect(whisper.detail == "→ Cursor")
+}
+
+@Test func notchWhisperPrefersTimerOverMusic() {
+    let whisper = NotchWhisper.pick(
+        listening: false,
+        destination: "Cursor",
+        attention: nil,
+        thermalException: false,
+        batteryPercent: 71,
+        powerMode: "Balanced",
+        workspaceFlash: nil,
+        musicTitle: "Let It Happen",
+        elapsed: "01:12",
+        timerRemaining: "24:10"
+    )
+    #expect(whisper == .timer(remaining: "24:10"))
+    #expect(whisper.detail == "Hour")
 }
 
 @Test func notchWhisperPrefersAttentionOverMusic() {
@@ -73,9 +146,64 @@ import Testing
     #expect(whisper.line.contains("needs you"))
 }
 
+@Test func menuBarIslandPrefersFlowThenAttentionThenMusic() {
+    let flow = MenuBarLive.snapshot(
+        listening: true,
+        attention: "Claude Code",
+        musicTitle: "Let It Happen",
+        musicPlaying: true,
+        outputName: "AirPods"
+    )
+    #expect(flow.line == "Flow")
+    let attention = MenuBarLive.snapshot(
+        listening: false,
+        attention: "Claude Code",
+        musicTitle: "Let It Happen",
+        musicPlaying: true,
+        outputName: "AirPods"
+    )
+    #expect(attention.line == "Claude Code")
+    let hour = MenuBarLive.snapshot(
+        listening: false,
+        attention: "Claude Code",
+        musicTitle: "Let It Happen",
+        musicPlaying: true,
+        outputName: "AirPods",
+        timerRemaining: "24:10"
+    )
+    #expect(hour.line == "24:10")
+    #expect(hour.detail == "Hour")
+    let music = MenuBarLive.snapshot(
+        listening: false,
+        attention: nil,
+        musicTitle: "Let It Happen",
+        musicPlaying: true,
+        outputName: "AirPods"
+    )
+    #expect(music.line == "Let It Happen")
+    #expect(music.pillWidth > 28)
+    #expect(music.pillWidth <= 176)
+}
+
+@Test func speakerDetentsMapAroundTheRing() {
+    #expect(DialMath.detentIndex(progress: 0, count: 4) == 0)
+    #expect(DialMath.detentIndex(progress: 1, count: 4) == 3)
+    #expect(DialMath.detentIndex(progress: 0.5, count: 3) == 1)
+    #expect(DialMath.detentProgress(index: 0, count: 1) == 0.5)
+    #expect(abs(DialMath.detentProgress(index: 2, count: 3) - 1) < 0.001)
+}
+
 @Test func sessionClockFormatsHours() {
     #expect(DialMath.sessionClock(74) == "01:14")
     #expect(DialMath.sessionClock(3723) == "1:02:03")
+}
+
+@Test func appKitAndAXFramesRoundTrip() {
+    let primaryHeight: CGFloat = 982
+    let cocoa = CGRect(x: 0, y: 0, width: 756, height: 944)
+    let ax = WorkspaceMath.axFrame(from: cocoa, primaryHeight: primaryHeight)
+    #expect(abs(ax.minY - (982 - 944)) < 0.5)
+    #expect(WorkspaceMath.appKitFrame(from: ax, primaryHeight: primaryHeight) == cocoa)
 }
 
 @Test func powerModesStayKnurlOwned() {
@@ -161,19 +289,44 @@ import Testing
     #expect(abs(audio.level - 0.37) < 0.08)
 }
 
+@Test func outputRosterRanksHeadphonesThenHomePod() {
+    let airpods = AudioDevice(id: 2, uid: "bt", name: "AirPods Pro", transport: .bluetooth)
+    let mac = AudioDevice(id: 1, uid: "mac", name: "MacBook Speakers", transport: .builtIn)
+    let pod = AudioDevice(id: 3, uid: "ap", name: "Kitchen", transport: .airPlay)
+    #expect(AudioOutputs.ranked([mac, pod, airpods]).map(\.uid) == ["bt", "ap", "mac"])
+}
+
+@Test func outputRosterAlwaysContainsTheCurrentDevice() {
+    let route = AudioOutputs()
+    guard let current = route.current else { return }
+    #expect(route.devices().contains { $0.uid == current.uid })
+}
+
 @Test func outputDeviceRoundTripOnThisMac() {
     let route = AudioOutputs()
     let devices = route.devices()
     guard let original = route.current, !devices.isEmpty else { return }
-    defer { route.select(original.id) }
+    print("output roster: " + devices.map { "\($0.transport.rawValue):\($0.name)" }.joined(separator: " | "))
+    defer { route.select(original) }
     if let other = devices.first(where: { $0.id != original.id }) {
-        route.select(other.id)
-        #expect(route.current?.id == other.id)
-        route.select(original.id)
-        #expect(route.current?.id == original.id)
+        #expect(route.select(other))
+        #expect(route.current?.uid == other.uid)
+        #expect(route.select(original))
+        #expect(route.current?.uid == original.uid)
     } else {
         route.cycle(by: 1)
         #expect(route.current != nil)
+    }
+}
+
+@Test func outputDialCyclesEverySpeakerOnThisMac() {
+    let route = AudioOutputs()
+    let devices = route.devices()
+    guard let original = route.current, devices.count > 1 else { return }
+    defer { route.select(original) }
+    for device in devices {
+        #expect(route.select(device))
+        #expect(route.current?.uid == device.uid)
     }
 }
 
@@ -182,6 +335,8 @@ import Testing
     #expect(AudioTransport.from(kAudioDeviceTransportTypeAirPlay) == .airPlay)
     #expect(AudioTransport.from(kAudioDeviceTransportTypeHDMI) == .hdmi)
     #expect(AudioTransport.from(kAudioDeviceTransportTypeBuiltIn).title == "Built-in")
+    #expect(AudioTransport.bluetooth.symbol == "headphones")
+    #expect(AudioTransport.airPlay.symbol == "homepod.fill")
 }
 
 @Test func outputMemoryRemembersAndRecalls() {

@@ -3,100 +3,162 @@ import SwiftUI
 
 struct HubHome: View {
     @Bindable var state: DialState
+    @Namespace private var room
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HubPageScroll {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Knurl")
-                        .font(.largeTitle.weight(.semibold))
-                    Text("Workstation")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    Text(DialMath.sessionClock(timeline.date.timeIntervalSince(state.desk.startedAt)))
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                        .contentTransition(.numericText())
-                }
-            }
-            .padding(.bottom, 8)
+            atmosphere
+            roomBoard
+            DeskCrownBank(state: state, hero: state.control, compact: true)
+            feel
+        }
+        .animation(motion, value: state.volumePercent)
+        .animation(motion, value: state.brightnessPercent)
+        .animation(motion, value: state.outputUID)
+        .animation(motion, value: state.control)
+        .animation(motion, value: state.desk.timer.running)
+        .animation(motion, value: state.desk.timer.readout)
+        .animation(motion, value: state.music.title)
+        .animation(motion, value: state.voice.isListening)
+        .animation(motion, value: state.tickSound)
+        .animation(motion, value: state.hapticOn)
+    }
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 28), GridItem(.flexible(), spacing: 28)], spacing: 28) {
-                HubSection(title: "Current project") {
-                    HubFact(label: "Harness", value: state.harnessName)
-                    HubFact(
-                        label: "Project",
-                        value: state.desk.projectName,
-                        secondary: "Named when a session reports a worktree."
-                    )
-                }
-                HubSection(title: "Agent pulse", accessory: "\(state.desk.workingCount) working") {
-                    HubFact(label: "Working", value: "\(state.desk.workingCount)")
-                    HubFact(label: "Needs you", value: needsYou)
-                }
-                HubSection(title: "Workspace") {
-                    HubFact(
-                        label: "Layout",
-                        value: state.desk.windows.lastPreset?.title ?? "Free",
-                        secondary: workspaceLine
-                    )
-                }
-                HubSection(title: "Project pulse") {
-                    HubFact(label: "Build", value: "—")
-                    HubFact(label: "Tests", value: "—")
-                    Text("Build and test facts arrive with agent hooks.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                HubSection(title: "Desk") {
-                    HubFact(label: "Output", value: state.outputName)
-                    HubFact(label: "Volume", value: state.isMuted ? "Muted" : "\(state.volumePercent)%")
-                    HubFact(label: "Mic", value: state.inputName)
-                    HubFact(label: "Brightness", value: "\(state.brightnessPercent)%")
-                }
-                HubSection(title: "Power") {
-                    HubFact(label: "Battery", value: state.desk.power.snapshot.percentLabel)
-                    HubFact(label: "Mode", value: state.desk.powerMode.title)
-                    HubFact(label: "Thermal", value: state.desk.power.snapshot.thermal.title)
-                    HubFact(label: "Source", value: state.desk.power.snapshot.chargeLabel)
-                }
-            }
+    private var motion: Animation? {
+        HubMotion.spring(reduceMotion: reduceMotion, allowed: state.desk.allowsDecorativeMotion)
+    }
 
-            HubDivider()
-
-            HubSection(title: "Current flow session") {
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    HStack(alignment: .firstTextBaseline, spacing: 28) {
-                        Text(DialMath.sessionClock(timeline.date.timeIntervalSince(state.desk.startedAt)))
-                            .font(.system(size: 34, weight: .semibold, design: .rounded).monospacedDigit())
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(state.desk.sessions.count) agents")
-                            Text("\(state.desk.flowUses) Flow uses")
-                            Text(state.music.hasTrack ? state.music.title : "No music")
-                                .foregroundStyle(.secondary)
-                        }
-                        .font(.callout)
-                        Spacer()
+    private var atmosphere: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            HubHallHeader(title: time(timeline.date), whisper: whisper) {
+                HStack(spacing: 8) {
+                    HubGlassButton(
+                        title: state.desk.timer.running ? state.desk.timer.readout : "Hour",
+                        symbol: "timer",
+                        selected: state.desk.timer.running
+                    ) {
+                        state.hubPage = .tools
+                    }
+                    HubGlassButton(
+                        title: "Flow",
+                        symbol: state.voice.isListening ? "waveform" : "mic.fill",
+                        selected: state.voice.isListening
+                    ) {
+                        state.hubPage = .flow
                     }
                 }
             }
         }
     }
 
-    private var needsYou: String {
-        let count = state.desk.attention.count
-        return count == 0 ? "Nothing needs you" : "\(count)"
+    private var roomBoard: some View {
+        HubSection(title: "Room") {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(DialMode.allCases) { mode in
+                        HubLiveTile(
+                            title: mode.title,
+                            value: tileValue(mode),
+                            symbol: tileSymbol(mode),
+                            tint: tileTint(mode),
+                            selected: state.control == mode
+                        ) {
+                            if state.control == mode {
+                                state.confirmDial()
+                            } else {
+                                state.selectControl(mode)
+                            }
+                        }
+                        .glassEffectID(mode.rawValue, in: room)
+                        .modifier(HubSelectedGlass(active: state.control == mode, id: "room-tile", namespace: room))
+                    }
+                }
+            }
+        }
     }
 
-    private var workspaceLine: String {
-        let windows = state.desk.windows.windows.count
-        let displays = state.desk.windows.displays.count
-        if !state.desk.windows.enabled {
-            return "Window Manager is off"
+    private var feel: some View {
+        HubSection(title: "Feel") {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(TickSound.allCases) { sound in
+                        HubGlassButton(
+                            title: sound.title,
+                            selected: state.tickSound == sound
+                        ) {
+                            state.setSound(sound)
+                        }
+                    }
+                    HubGlassButton(
+                        title: "Haptic",
+                        symbol: state.hapticOn ? "hand.tap.fill" : "hand.tap",
+                        selected: state.hapticOn
+                    ) {
+                        state.setHaptic(!state.hapticOn)
+                    }
+                }
+            }
         }
-        return "\(windows) windows · \(displays) displays"
+    }
+
+    private var whisper: String {
+        if state.desk.timer.running {
+            return "Hour · \(state.desk.timer.readout)"
+        }
+        if state.voice.isListening {
+            return "Flow → \(state.harnessName)"
+        }
+        if state.music.hasTrack {
+            return state.music.title
+        }
+        return "\(state.control.title) · enjoy the Mac."
+    }
+
+    private func time(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    private func tileValue(_ mode: DialMode) -> String {
+        switch mode {
+        case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
+        case .brightness: "\(state.brightnessPercent)"
+        case .mic: state.isMicMuted ? "Muted" : "\(state.micPercent)"
+        case .output: shortName(state.outputName)
+        case .media: state.music.hasTrack ? shortName(state.music.title) : "—"
+        }
+    }
+
+    private func tileSymbol(_ mode: DialMode) -> String {
+        switch mode {
+        case .volume: state.isMuted ? "speaker.slash.fill" : mode.symbol
+        case .mic: state.isMicMuted ? "mic.slash.fill" : mode.symbol
+        case .media: state.music.isPlaying ? "pause.fill" : mode.symbol
+        case .output:
+            state.outputDevices.first { $0.uid == state.outputUID }?.transport.symbol
+                ?? mode.symbol
+        case .brightness:
+            mode.symbol
+        }
+    }
+
+    private func tileTint(_ mode: DialMode) -> Color {
+        let progress: Double = switch mode {
+        case .volume: state.volumeProgress
+        case .brightness: Double(state.brightnessPercent) / 100
+        case .mic: Double(state.micPercent) / 100
+        case .output: state.outputProgress
+        case .media: state.music.displayedPlayhead()
+        }
+        return HubTint.face(
+            mode,
+            progress: progress,
+            muted: (mode == .volume && state.isMuted) || (mode == .mic && state.isMicMuted)
+        )
+    }
+
+    private func shortName(_ name: String) -> String {
+        name.count > 12 ? String(name.prefix(11)) + "…" : name
     }
 }
 
@@ -105,7 +167,7 @@ struct HubPageScroll<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 28) {
                 content()
             }
             .padding(.horizontal, 36)

@@ -17,6 +17,7 @@ final class DeskContext {
     private(set) var lastHarness = ""
     private(set) var flowUses = 0
     private(set) var lastFlowCharacters = 0
+    var timer = DeskTimer()
 
     let power = PowerWatch()
     let windows = WindowCatalog()
@@ -73,6 +74,14 @@ final class DeskContext {
         _ = session
     }
 
+    func noteTimerStarted() {
+        record(.timerStarted, "Hour \(timer.readout)")
+    }
+
+    func noteTimerEnded() {
+        record(.timerEnded, "Hour done")
+    }
+
     func whisper(
         listening: Bool,
         destination: String,
@@ -88,7 +97,8 @@ final class DeskContext {
             powerMode: powerMode.title,
             workspaceFlash: workspaceFlash,
             musicTitle: musicTitle,
-            elapsed: DialMath.sessionClock(now.timeIntervalSince(startedAt))
+            elapsed: DialMath.sessionClock(now.timeIntervalSince(startedAt)),
+            timerRemaining: timer.whisper
         )
     }
 
@@ -96,8 +106,9 @@ final class DeskContext {
         if snapshot.thermal.isException {
             record(.thermal, "Thermal \(snapshot.thermal.title)")
         }
-        if receipts.last(where: { $0.kind == .powerSnapshot })?.summary != snapshot.percentLabel {
-            record(.powerSnapshot, "Battery \(snapshot.percentLabel) · \(snapshot.chargeLabel)")
+        let sourceLine = "\(snapshot.source.title) · \(snapshot.chargeLabel)"
+        if receipts.last(where: { $0.kind == .powerSnapshot })?.summary != sourceLine {
+            record(.powerSnapshot, sourceLine)
         }
     }
 

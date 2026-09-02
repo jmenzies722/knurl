@@ -184,7 +184,7 @@ struct HUDView: View {
                 }
             }
             .onDisappear {
-                if state.voice.isActive {
+                if state.flowOrigin == .hud {
                     state.endTalk()
                 }
             }
@@ -297,27 +297,7 @@ struct HUDView: View {
     @ViewBuilder
     private var librarySources: some View {
         if state.control == .media {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(state.music.sources) { source in
-                        let selected = state.music.activeSourceID == source.id
-                        Text(source.title)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .foregroundStyle(.primary.opacity(0.9))
-                            .glassEffect(
-                                selected
-                                    ? .regular.tint(DialSwatch.volume(state).opacity(0.45))
-                                    : .regular,
-                                in: Capsule()
-                            )
-                            .overlay(ImmediatePress(action: { state.playSource(source.id) }))
-                    }
-                }
-            }
-            .frame(height: 36)
+            MusicLibraryStrip(state: state, compact: true)
         }
     }
 
@@ -325,16 +305,8 @@ struct HUDView: View {
     private var outputRoster: some View {
         if state.control == .output {
             VStack(alignment: .leading, spacing: 8) {
+                HomePodRouteButton(nearby: OutputWatch.shared.airPlayNearby)
                 HStack(spacing: 8) {
-                    RoutePicker()
-                        .frame(width: 28, height: 28)
-                    Text("AirPlay")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("HomePods, TVs, Wi‑Fi speakers")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
                     Text(state.swapLabel)
                         .font(.system(size: 11, weight: .semibold))
                         .padding(.horizontal, 8)
@@ -344,38 +316,13 @@ struct HUDView: View {
                             in: Capsule()
                         )
                         .overlay(ImmediatePress(action: { state.swapSpeaker() }))
-                }
-                if let memory = state.outputMemoryLine {
-                    Text(memory)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(state.outputDevices) { device in
-                            let selected = device.uid == state.outputUID
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(device.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                Text(device.transport.title)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .foregroundStyle(.primary.opacity(0.9))
-                            .glassEffect(
-                                selected
-                                    ? .regular.tint(DialSwatch.output.opacity(0.45))
-                                    : .regular,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .overlay(ImmediatePress(action: { state.selectOutput(device) }))
-                        }
+                    if let memory = state.outputMemoryLine {
+                        Text(memory)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .frame(height: 44)
             }
         }
     }
@@ -390,7 +337,7 @@ struct HUDView: View {
         switch mode {
         case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
         case .brightness: "\(state.brightnessPercent)"
-        case .mic: state.voice.isListening ? "Talk" : (state.isMicMuted ? "Muted" : "Mic")
+        case .mic: state.voice.isListening ? "Flow" : (state.isMicMuted ? "Muted" : "Mic")
         case .output: "Out"
         case .media: mediaChipLabel
         }
@@ -417,6 +364,11 @@ private struct CrownDial: View {
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
                     state.turnDial(at: value.location, size: CGSize(width: size, height: size))
+                }
+                .onEnded { _ in
+                    if state.control == .output {
+                        state.finishOutputTurn()
+                    }
                 }
         )
         .onTapGesture {

@@ -13,6 +13,10 @@ final class DialHostingView<Content: View>: NSHostingView<Content> {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if event.knurlIsHorizontal {
+            super.scrollWheel(with: event)
+            return
+        }
         AppDelegate.shared?.state.handleScroll(event)
     }
 }
@@ -31,7 +35,17 @@ final class DialPanel: NSPanel {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if event.knurlIsHorizontal {
+            super.scrollWheel(with: event)
+            return
+        }
         AppDelegate.shared?.state.handleScroll(event)
+    }
+}
+
+private extension NSEvent {
+    var knurlIsHorizontal: Bool {
+        abs(scrollingDeltaX) > abs(scrollingDeltaY) && abs(scrollingDeltaX) > 0.4
     }
 }
 
@@ -116,6 +130,7 @@ final class HUDPanel {
         if let scroll = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { event in
             guard AppDelegate.shared?.state.isPresented == true else { return event }
             if let window = event.window, window != panel { return event }
+            if event.knurlIsHorizontal { return event }
             AppDelegate.shared?.state.handleScroll(event)
             return nil
         }) {

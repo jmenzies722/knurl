@@ -8,22 +8,36 @@ final class StatusBar {
 
     private var item: NSStatusItem?
     private var menu: NSMenu?
-    private var lastTitle = ""
+    private var host: NSHostingView<StatusBarPill>?
+    private var popover: NSPopover?
+    private var lastWidth: CGFloat = 0
 
     private init() {}
 
     func attach(target: AnyObject, show: Selector, hub: Selector, settings: Selector, quit: Selector) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = item.button {
-            button.image = crownImage()
-            button.imagePosition = .imageOnly
-            button.target = target
-            button.action = #selector(AppDelegate.statusItemClicked)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "Knurl"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = item.button else { return }
+        button.image = nil
+        button.title = ""
+        button.imagePosition = .noImage
+        button.target = target
+        button.action = #selector(AppDelegate.statusItemClicked)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.toolTip = "Knurl"
+        if let state = AppDelegate.shared?.state {
+            let host = NSHostingView(rootView: StatusBarPill(state: state))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(host)
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+                host.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+                host.topAnchor.constraint(equalTo: button.topAnchor),
+                host.bottomAnchor.constraint(equalTo: button.bottomAnchor),
+            ])
+            self.host = host
         }
         let menu = NSMenu()
-        menu.addItem(withTitle: "Show Knurl  \(HotkeyCenter.shared.chord)", action: show, keyEquivalent: "d")
+        menu.addItem(withTitle: "Show Dial  \(HotkeyCenter.shared.chord)", action: show, keyEquivalent: "d")
         menu.addItem(withTitle: "Open Knurl", action: hub, keyEquivalent: "h")
         menu.addItem(withTitle: "Settings…", action: settings, keyEquivalent: ",")
         menu.addItem(.separator())
@@ -31,54 +45,56 @@ final class StatusBar {
         menu.items.forEach { $0.target = target }
         self.item = item
         self.menu = menu
-        applyCrown()
+        if let state = AppDelegate.shared?.state {
+            refresh(state)
+        }
     }
 
     func handleClick() {
         guard let event = NSApp.currentEvent else {
-            AppDelegate.shared?.state.summonFromMenuBar()
+            toggleShelf()
             return
         }
         if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            closeShelf()
             item?.menu = menu
             item?.button?.performClick(nil)
             item?.menu = nil
             return
         }
-        AppDelegate.shared?.state.summonFromMenuBar()
+        toggleShelf()
+    }
+
+    func toggleShelf() {
+        if popover?.isShown == true {
+            closeShelf()
+            return
+        }
+        guard let button = item?.button, let state = AppDelegate.shared?.state else { return }
+        AppDelegate.shared?.noteHUDActivation()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        let controller = NSHostingController(rootView: StatusBarShelf(state: state))
+        controller.sizingOptions = .preferredContentSize
+        popover.contentViewController = controller
+        popover.contentSize = NSSize(width: 320, height: 220)
+        self.popover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func closeShelf() {
+        popover?.performClose(nil)
+        popover = nil
     }
 
     func refresh(_ state: DialState) {
-        if let cover = state.music.cover, state.music.hasTrack {
-            if state.music.title != lastTitle {
-                lastTitle = state.music.title
-            }
-            item?.button?.image = rounded(cover)
-            item?.button?.image?.isTemplate = false
-            item?.button?.toolTip = [state.music.title, state.music.artist]
-                .filter { !$0.isEmpty }
-                .joined(separator: " — ")
-        } else {
-            lastTitle = ""
-            applyCrown()
+        let live = state.menuBarLive
+        let width = live.pillWidth
+        if abs(width - lastWidth) > 0.5 {
+            lastWidth = width
+            item?.length = width
         }
-    }
-
-    private func applyCrown() {
-        item?.button?.image = crownImage()
-        item?.button?.image?.isTemplate = true
-        item?.button?.toolTip = "Knurl"
-    }
-
-    private func crownImage() -> NSImage? {
-        let image = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "Knurl")
-        image?.isTemplate = true
-        return image
-    }
-
-    private func rounded(_ image: NSImage) -> NSImage {
-        let copy = image.copy() as? NSImage ?? image
-        copy.size = NSSize(width: 18, height: 18)
-        return copy
+        item?.button?.toolTip = [live.line, live.detail].filter { !$0.isEmpty }.joined(separator: " — ")
     }
 }

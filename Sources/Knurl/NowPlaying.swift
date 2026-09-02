@@ -5,8 +5,19 @@ import KnurlCore
 import Observation
 
 struct MusicSource: Identifiable, Hashable, Sendable {
+    enum Kind: String, Sendable { case genre, playlist }
+
     let id: String
     let title: String
+    let kind: Kind
+
+    static func genre(_ name: String) -> MusicSource {
+        MusicSource(id: "genre:\(name)", title: name, kind: .genre)
+    }
+
+    static func playlist(_ name: String) -> MusicSource {
+        MusicSource(id: "playlist:\(name)", title: name, kind: .playlist)
+    }
 }
 
 @MainActor
@@ -82,12 +93,19 @@ final class NowPlaying {
     func playSource(_ id: String) async {
         if !MusicApp.isOpen { await MusicApp.ensureOpen() }
         activeSourceID = id
-        if MusicApp.playPlaylist(id) {
+        let played: Bool
+        if id.hasPrefix("genre:") {
+            played = MusicApp.playGenre(String(id.dropFirst(6)))
+        } else {
+            let name = id.hasPrefix("playlist:") ? String(id.dropFirst(9)) : id
+            played = MusicApp.playPlaylist(name)
+        }
+        if played {
             message = nil
             quietUntil = Date().addingTimeInterval(0.45)
             return
         }
-        message = MusicApp.lastError ?? "Couldn’t start that playlist in Music."
+        message = MusicApp.lastError ?? "Couldn’t start that in Music."
     }
 
     func toggle() async {
@@ -178,6 +196,7 @@ final class NowPlaying {
         artist = track.artist
         album = track.album
         genre = track.genre
+        promoteGenre(track.genre)
         if Date() >= quietUntil {
             isPlaying = track.isPlaying
         }
@@ -241,11 +260,35 @@ final class NowPlaying {
         await MusicApp.ensureOpen()
         guard Date().timeIntervalSince(lastSourcePull) > 8 || sources.isEmpty else { return }
         lastSourcePull = Date()
-        let names = MusicApp.userPlaylists()
-        sources = names.map { MusicSource(id: $0, title: $0) }
+        var seen = Set<String>()
+        var next: [MusicSource] = []
+        func addGenre(_ raw: String) {
+            let name = MusicApp.cleanGenre(raw)
+            guard !name.isEmpty, seen.insert("genre:\(name.lowercased())").inserted else { return }
+            next.append(.genre(name))
+        }
+        addGenre(genre)
+        for name in MusicApp.recentGenres() { addGenre(name) }
+        for name in MusicApp.userPlaylists() {
+            next.append(.playlist(name))
+        }
+        sources = next
         if sources.isEmpty, let error = MusicApp.lastError {
             message = error
         }
+    }
+
+    private func promoteGenre(_ raw: String) {
+        let name = MusicApp.cleanGenre(raw)
+        guard !name.isEmpty else { return }
+        let chip = MusicSource.genre(name)
+        if let index = sources.firstIndex(where: { $0.id == chip.id }) {
+            if index > 0 {
+                sources.move(fromOffsets: IndexSet(integer: index), toOffset: 0)
+            }
+            return
+        }
+        sources = [chip] + sources
     }
 
     private func stopOwnPlayer() {

@@ -3,6 +3,7 @@ import Foundation
 
 public enum NotchMath: Sendable {
     public static let shelfHeight: CGFloat = 52
+    public static let flowShelfHeight: CGFloat = 112
     public static let shelfGap: CGFloat = 5
     public static let shelfWidth: CGFloat = 360
 
@@ -26,11 +27,15 @@ public enum NotchMath: Sendable {
     }
 
     /// Panel that keeps the camera housing where it is and grows a shelf below it.
-    public static func expandedFrame(housing: CGRect, visible: CGRect) -> CGRect {
+    public static func expandedFrame(
+        housing: CGRect,
+        visible: CGRect,
+        shelf: CGFloat = shelfHeight
+    ) -> CGRect {
         let width = min(max(housing.width + 80, shelfWidth), max(housing.width, visible.width - 32))
-        let height = housing.height + shelfGap + shelfHeight
+        let height = housing.height + shelfGap + shelf
         let x = min(max(visible.minX + 16, housing.midX - width / 2), visible.maxX - width - 16)
-        return CGRect(x: x, y: housing.minY - shelfGap - shelfHeight, width: width, height: height)
+        return CGRect(x: x, y: housing.minY - shelfGap - shelf, width: width, height: height)
     }
 
     public static func housingInExpanded(housing: CGRect, expanded: CGRect) -> CGRect {
@@ -42,12 +47,12 @@ public enum NotchMath: Sendable {
         )
     }
 
-    public static func shelfInExpanded(expanded: CGRect) -> CGRect {
+    public static func shelfInExpanded(expanded: CGRect, shelf: CGFloat = shelfHeight) -> CGRect {
         CGRect(
             x: 0,
             y: 0,
             width: expanded.width,
-            height: shelfHeight
+            height: shelf
         )
     }
 }

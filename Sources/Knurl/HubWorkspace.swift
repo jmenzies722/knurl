@@ -3,14 +3,18 @@ import SwiftUI
 
 struct HubWorkspace: View {
     @Bindable var state: DialState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HubPageScroll {
-            Text("Workspace")
-                .font(.largeTitle.weight(.semibold))
-            Text("Arrange the desk. Not a screenshot.")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            HubHallHeader(
+                title: "Workspace",
+                whisper: "Snap the room. Stay in the work."
+            ) {
+                Text(state.desk.windows.lastPreset?.title ?? "Free")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
 
             if !state.desk.windows.enabled {
                 HubSection(title: "Window manager") {
@@ -43,6 +47,13 @@ struct HubWorkspace: View {
                 snaps
             }
         }
+        .animation(
+            HubMotion.lively(
+                reduceMotion: reduceMotion,
+                allowed: state.desk.allowsDecorativeMotion
+            ),
+            value: state.desk.windows.lastPreset
+        )
         .onAppear {
             if state.desk.windows.enabled {
                 state.desk.windows.refresh()
@@ -76,19 +87,21 @@ struct HubWorkspace: View {
 
     private var presets: some View {
         HubSection(title: "Presets") {
-            FlowLayout {
-                ForEach(WorkspacePreset.allCases) { preset in
-                    HubGlassButton(
-                        title: preset.title,
-                        selected: state.desk.windows.lastPreset == preset
-                    ) {
-                        state.desk.windows.apply(preset)
-                        state.desk.noteWorkspace(preset)
+            GlassEffectContainer(spacing: 8) {
+                FlowLayout {
+                    ForEach(WorkspacePreset.allCases) { preset in
+                        HubGlassButton(
+                            title: preset.title,
+                            selected: state.desk.windows.lastPreset == preset
+                        ) {
+                            state.desk.windows.apply(preset)
+                            state.desk.noteWorkspace(preset)
+                        }
+                        .help(preset.summary)
                     }
-                    .help(preset.summary)
-                }
-                HubGlassButton(title: "Restore", symbol: "arrow.uturn.backward") {
-                    state.desk.windows.restore()
+                    HubGlassButton(title: "Restore", symbol: "arrow.uturn.backward") {
+                        state.desk.windows.restore()
+                    }
                 }
             }
         }
@@ -153,8 +166,9 @@ struct WorkspaceCanvas: View {
                 .strokeBorder(selected ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1)
         )
         .offset(x: rect.minX, y: rect.minY)
+        .onTapGesture { onSelect(window.id) }
         .gesture(
-            DragGesture()
+            DragGesture(minimumDistance: 4)
                 .onChanged { value in
                     onSelect(window.id)
                     let origin = WorkspaceMath.screenPoint(
@@ -167,7 +181,6 @@ struct WorkspaceCanvas: View {
                     onMove(window.id, frame)
                 }
         )
-        .overlay(ImmediatePress(action: { onSelect(window.id) }))
     }
 }
 

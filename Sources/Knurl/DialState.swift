@@ -10,7 +10,9 @@ import ServiceManagement
 final class DialState {
     var isPresented = false
     var isNotchExpanded = false
-    var control: DialMode = .volume
+    var notchHousing = CGRect.zero
+    var notchExpanded = CGRect.zero
+    var control: DialMode = Preferences.lastMode
     var mode: DialMode = Preferences.lastMode
     var message: String?
     var volumePercent = 0
@@ -33,6 +35,8 @@ final class DialState {
     var loginItemError: String?
     var inputUID = ""
     var inputDevices: [AudioDevice] = []
+    var roomDimmed = false
+    private var hourOwnsDim = false
     let music = NowPlaying()
     let voice = Voice()
     let desk = DeskContext()
@@ -46,6 +50,7 @@ final class DialState {
     private var scrollCarry = 0.0
     private var previousOutput: AudioDevice?
     private var lastOutputUID: String?
+    private var brightnessBeforeDim: Double?
     private var lastObservedLevel: Float = 0
     private var lastObservedMute = false
     private var outputMemory = Preferences.outputMemory
@@ -56,6 +61,7 @@ final class DialState {
     private var sessionTask: Task<Void, Never>?
     private var editor: NSRunningApplication?
     private var lastCrownSignature = ""
+    private var outputRosterFrozen = false
 
     var volumeProgress: Double { Double(volumePercent) / 100 }
 
@@ -63,10 +69,18 @@ final class DialState {
         switch control {
         case .brightness: Double(brightnessPercent) / 100
         case .mic: Double(micPercent) / 100
-        case .output: 0.5
+        case .output: outputProgress
         case .media: music.displayedPlayhead()
         case .volume: volumeProgress
         }
+    }
+
+    var outputIndex: Int {
+        outputDevices.firstIndex(where: { $0.uid == outputUID }) ?? 0
+    }
+
+    var outputProgress: Double {
+        DialMath.detentProgress(index: outputIndex, count: outputDevices.count)
     }
 
     var controlAngle: Double { DialMath.ringAngle(progress: controlProgress) }
@@ -86,7 +100,7 @@ final class DialState {
     }
 
     var usesRingGauge: Bool {
-        control.isGauge || control == .media
+        control.isGauge || control == .media || control == .output
     }
 
     var volumeAngle: Double { DialMath.ringAngle(progress: volumeProgress) }
@@ -96,7 +110,7 @@ final class DialState {
         case .volume: volumeProgress
         case .brightness: Double(brightnessPercent) / 100
         case .media: music.playhead
-        case .output: 0.5
+        case .output: outputProgress
         case .mic: Double(micPercent) / 100
         }
     }
@@ -183,6 +197,7 @@ final class DialState {
                 rememberCurrentVolume()
                 music.refresh()
                 refreshMeters()
+                tickHour()
                 StatusBar.shared.refresh(self)
                 try? await Task.sleep(for: .milliseconds(400))
             }
@@ -190,7 +205,7 @@ final class DialState {
     }
 
     func dismiss() {
-        if voice.isActive {
+        if flowOrigin == .hud {
             endTalk()
         }
         isPresented = false
@@ -209,9 +224,9 @@ final class DialState {
         }
     }
 
-    func expandNotch() {
+    func expandNotch(flow: Bool = false) {
         isNotchExpanded = true
-        NotchPanel.shared.expand()
+        NotchPanel.shared.expand(flow: flow || voice.isActive)
     }
 
     func collapseNotch() {
@@ -288,29 +303,51 @@ final class DialState {
         }
     }
 
+    enum FlowOrigin {
+        case hud
+        case notch
+    }
+
+    private(set) var flowOrigin: FlowOrigin?
+    private var flowCollapseTask: Task<Void, Never>?
+
+    var hasNotchHousing: Bool { NotchPanel.shared.hasHousing }
+
+    func beginTalkFromHotkey() {
+        beginTalk(presentHUD: !hasNotchHousing)
+    }
+
     func beginTalk(presentHUD: Bool = true) {
+        if voice.isActive { return }
         rememberEditor()
         if isMicMuted {
             toggleMic()
         }
+        flowCollapseTask?.cancel()
         if presentHUD, control != .mic {
             selectControl(.mic)
         }
+        flowOrigin = presentHUD ? .hud : .notch
         if presentHUD {
             if isPresented {
                 HUDPanel.shared.makeKey()
             } else {
                 show()
             }
+        } else if hasNotchHousing {
+            expandNotch(flow: true)
+            NotchPanel.shared.watchFlowEscape()
         }
         desk.noteFlowStart()
         Task { await voice.start(editor: editor) }
     }
 
     func endTalk() {
+        let origin = flowOrigin
         Task {
             await voice.stop()
             desk.noteFlowEnd(characters: voice.lastTranscript.count)
+            settleFlowDetent(origin)
         }
     }
 
@@ -323,7 +360,34 @@ final class DialState {
     }
 
     func cancelTalk() {
-        Task { await voice.cancel() }
+        Task {
+            await voice.cancel()
+            flowOrigin = nil
+            NotchPanel.shared.ignoreEscape()
+            if hasNotchHousing {
+                collapseNotch()
+            }
+        }
+    }
+
+    func escapeNotch() {
+        if voice.isActive {
+            cancelTalk()
+        } else {
+            collapseNotch()
+        }
+    }
+
+    private func settleFlowDetent(_ origin: FlowOrigin?) {
+        flowOrigin = nil
+        NotchPanel.shared.ignoreEscape()
+        guard origin == .notch, hasNotchHousing, isNotchExpanded else { return }
+        flowCollapseTask?.cancel()
+        flowCollapseTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, !voice.isActive else { return }
+            collapseNotch()
+        }
     }
 
     func resendTalk() {
@@ -454,9 +518,25 @@ final class DialState {
 
     func selectOutput(_ device: AudioDevice) {
         rememberOutput()
-        outputs.select(device.id)
+        outputs.select(device)
         handleRouteChange()
         DialTick.play()
+    }
+
+    func setOutputProgress(_ value: Double) {
+        outputRosterFrozen = true
+        let roster = outputDevices.isEmpty ? outputs.devices() : outputDevices
+        if outputDevices.isEmpty { outputDevices = roster }
+        let index = DialMath.detentIndex(progress: value, count: roster.count)
+        guard roster.indices.contains(index) else { return }
+        if roster[index].uid != outputUID {
+            selectOutput(roster[index])
+        }
+    }
+
+    func finishOutputTurn() {
+        outputRosterFrozen = false
+        refreshMeters()
     }
 
     func turnDial(at location: CGPoint, size: CGSize) {
@@ -465,12 +545,14 @@ final class DialState {
         let degrees = atan2(dx, -dy) * 180 / .pi
         guard let next = DialMath.ringProgress(clockwiseFromNoon: degrees) else { return }
         if control == .media, !music.canSeek { return }
-        guard DialMath.acceptsGaugeJump(from: controlProgress, to: next) else { return }
+        if control != .output {
+            guard DialMath.acceptsGaugeJump(from: controlProgress, to: next) else { return }
+        }
         applyControl(next)
     }
 
     func selectControl(_ next: DialMode) {
-        if control == .mic, next != .mic, voice.isActive {
+        if control == .mic, next != .mic, flowOrigin == .hud {
             endTalk()
         }
         control = next
@@ -536,8 +618,7 @@ final class DialState {
         case .brightness: setRoomBrightness(value)
         case .mic: setRoomMic(value)
         case .output:
-            if value > 0.62 { cycleSpeaker(1) }
-            else if value < 0.38 { cycleSpeaker(-1) }
+            setOutputProgress(value)
         case .media:
             music.seek(to: value)
         }
@@ -601,6 +682,101 @@ final class DialState {
     func swapSpeaker() {
         swapOutput()
         DialTick.play()
+    }
+
+    func tickHour() {
+        if desk.timer.tick(now: Date()) {
+            finishHour()
+        }
+    }
+
+    func setHourCrown(_ value: Double) {
+        if desk.timer.setCrown(value) {
+            finishHour()
+        }
+    }
+
+    func setHourDuration(_ seconds: TimeInterval) {
+        desk.timer.setDuration(seconds)
+        if hourOwnsDim, !desk.timer.running {
+            restoreHourDim()
+        }
+    }
+
+    func toggleHour() {
+        if desk.timer.running {
+            if desk.timer.pause() {
+                finishHour()
+            }
+        } else {
+            desk.timer.start()
+            desk.noteTimerStarted()
+            DialTick.play()
+        }
+    }
+
+    func startTheHour() {
+        desk.timer.setDuration(50 * 60)
+        desk.timer.start()
+        desk.noteTimerStarted()
+        hourOwnsDim = true
+        setRoomDim(true)
+        DialTick.play()
+    }
+
+    func resetHour() {
+        desk.timer.reset()
+        restoreHourDim()
+    }
+
+    func finishHour() {
+        restoreHourDim()
+        desk.timer.reset()
+        DialTick.play()
+        desk.noteTimerEnded()
+        message = "Hour done"
+    }
+
+    private func restoreHourDim() {
+        if hourOwnsDim {
+            hourOwnsDim = false
+            if roomDimmed {
+                setRoomDim(false)
+            }
+        }
+    }
+
+    func setRoomDim(_ on: Bool) {
+        if on {
+            if !roomDimmed {
+                brightnessBeforeDim = Double(brightnessPercent) / 100
+            }
+            roomDimmed = true
+            setRoomBrightness(0.18)
+        } else {
+            hourOwnsDim = false
+            roomDimmed = false
+            if let prior = brightnessBeforeDim {
+                setRoomBrightness(prior)
+            }
+            brightnessBeforeDim = nil
+        }
+    }
+
+    func toggleRoomDim() {
+        setRoomDim(!roomDimmed)
+    }
+
+    var menuBarLive: MenuBarLive {
+        MenuBarLive.snapshot(
+            listening: voice.isActive,
+            attention: desk.attention.first?.provider.title,
+            musicTitle: music.hasTrack ? music.title : nil,
+            musicPlaying: music.isPlaying,
+            outputName: outputName,
+            timerRemaining: desk.timer.whisper,
+            destination: harnessName
+        )
     }
 
     func setGauge(_ value: Double, track: Bool = false) {
@@ -806,7 +982,9 @@ final class DialState {
             artKey: nil,
             art: nil,
             playlists: media
-                ? Array(music.sources.map(\.title).prefix(32)).map { String($0.prefix(40)) }
+                ? Array(
+                    music.sources.filter { $0.kind == .playlist }.map(\.title).prefix(32)
+                ).map { String($0.prefix(40)) }
                 : nil,
             devices: crownDevices,
             deviceUID: crownDeviceUID
@@ -836,6 +1014,22 @@ final class DialState {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Media") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    func openBluetoothSettings() {
+        openSettingsPane("x-apple.systempreferences:com.apple.settings.Bluetooth")
+            || openSettingsPane("x-apple.systempreferences:com.apple.Bluetooth")
+    }
+
+    func openSoundSettings() {
+        openSettingsPane("x-apple.systempreferences:com.apple.Sound-Settings.extension")
+            || openSettingsPane("x-apple.systempreferences:com.apple.preference.sound")
+    }
+
+    @discardableResult
+    private func openSettingsPane(_ spec: String) -> Bool {
+        guard let url = URL(string: spec) else { return false }
+        return NSWorkspace.shared.open(url)
     }
 
     private func applyVolume(_ detents: Int) {
@@ -870,7 +1064,7 @@ final class DialState {
     private func swapOutput() {
         let current = outputs.current
         if let previousOutput, previousOutput.id != current?.id {
-            outputs.select(previousOutput.id)
+            outputs.select(previousOutput)
             self.previousOutput = current
         } else {
             rememberOutput()
@@ -909,7 +1103,7 @@ final class DialState {
         outputName = outputs.current?.name ?? "No output"
         outputKind = outputs.current?.transport.title ?? "Output"
         outputUID = outputs.current?.uid ?? ""
-        outputDevices = outputs.devices()
+        adoptOutputDevices(outputs.devices())
         inputName = inputs.current?.name ?? mic.deviceName
         inputUID = inputs.current?.uid ?? ""
         inputDevices = inputs.devices()
@@ -988,5 +1182,14 @@ final class DialState {
 
     private func syncAngle() {
         angle = DialMath.gaugeAngle(progress: progress)
+    }
+
+    private func adoptOutputDevices(_ next: [AudioDevice]) {
+        guard outputRosterFrozen, !outputDevices.isEmpty else {
+            outputDevices = next
+            return
+        }
+        let incoming = Dictionary(uniqueKeysWithValues: next.map { ($0.uid, $0) })
+        outputDevices = outputDevices.map { incoming[$0.uid] ?? $0 }
     }
 }

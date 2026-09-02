@@ -8,22 +8,16 @@ struct HubSystem: View {
 
     var body: some View {
         HubPageScroll {
-            HStack(alignment: .center, spacing: 16) {
-                Text("System")
-                    .font(.largeTitle.weight(.semibold))
-                Spacer()
+            HubHallHeader(title: "System", whisper: "The room around \(state.harnessName)") {
                 faceSwitcher
             }
-
-            deskStrip
-            HubDivider()
             stage
             HubDivider()
             power
             HubDivider()
             adaptive
         }
-        .animation(reduceMotion || !state.desk.allowsDecorativeMotion ? nil : .snappy(duration: 0.22), value: state.control)
+        .animation(HubMotion.lively(reduceMotion: reduceMotion, allowed: state.desk.allowsDecorativeMotion), value: state.control)
     }
 
     private var faceSwitcher: some View {
@@ -55,6 +49,7 @@ struct HubSystem: View {
                         selected ? .regular.tint(tint.opacity(0.45)).interactive() : .regular.interactive(),
                         in: Capsule()
                     )
+                    .glassEffectID(mode.rawValue, in: faces)
                     .modifier(SelectedFaceGlass(active: selected, namespace: faces))
                     .overlay(
                         ImmediatePress {
@@ -68,49 +63,17 @@ struct HubSystem: View {
         }
     }
 
-    private var deskStrip: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HubFact(label: "Harness", value: state.harnessName)
-            HubFact(label: "Flow", value: state.talkDestination)
-            if state.control == .volume {
-                HubFact(label: "Output", value: state.outputName)
-            }
-            if state.control == .brightness {
-                HubFact(label: "Display", value: "Built-in")
-            }
-            if state.control == .mic {
-                HubFact(label: "Input", value: state.inputName)
-            }
-            if state.control == .output, let memory = state.outputMemoryLine {
-                HubFact(label: "Memory", value: memory)
-            }
-        }
-    }
-
     @ViewBuilder
     private var stage: some View {
         switch state.control {
-        case .media: mediaStage
-        case .volume:
-            gauge(
-                state.isMuted ? "Muted" : "\(state.volumePercent)",
-                .volume,
-                Binding(get: { state.volumeProgress }, set: { state.setRoomVolume($0) })
-            )
-        case .brightness:
-            gauge(
-                "\(state.brightnessPercent)",
-                .brightness,
-                Binding(get: { Double(state.brightnessPercent) / 100 }, set: { state.setRoomBrightness($0) })
-            )
-        case .output: outputStage
+        case .media:
+            VStack(alignment: .leading, spacing: 20) {
+                mediaStage
+                DeskCrownBank(state: state, hero: .volume)
+            }
         case .mic:
-            VStack(alignment: .leading, spacing: 16) {
-                gauge(
-                    state.isMicMuted ? "Muted" : "\(state.micPercent)",
-                    .mic,
-                    Binding(get: { Double(state.micPercent) / 100 }, set: { state.setRoomMic($0) })
-                )
+            VStack(alignment: .leading, spacing: 18) {
+                DeskCrownBank(state: state, hero: .mic)
                 ForEach(state.inputDevices) { device in
                     let selected = device.uid == state.inputUID
                     HubFact(label: selected ? "Now" : "", value: device.name, secondary: device.transport.title)
@@ -118,6 +81,8 @@ struct HubSystem: View {
                         .overlay(ImmediatePress(action: { state.selectInput(device) }))
                 }
             }
+        default:
+            DeskCrownBank(state: state, hero: state.control)
         }
     }
 
@@ -140,41 +105,11 @@ struct HubSystem: View {
             if !state.music.genre.isEmpty {
                 HubFact(label: "Genre", value: state.music.genre)
             }
+            HubSection(title: "Library") {
+                MusicLibraryStrip(state: state)
+            }
             seek
             transport
-        }
-    }
-
-    private func gauge(_ title: String, _ mode: DialMode, _ value: Binding<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 44, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(reduceMotion ? .opacity : .numericText())
-                .foregroundStyle(HubTint.face(mode, progress: value.wrappedValue, muted: false))
-            Slider(value: value, in: 0 ... 1)
-                .frame(maxWidth: 360)
-        }
-    }
-
-    private var outputStage: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HubFact(label: "Device", value: state.outputName)
-            HubFact(label: "Kind", value: state.outputKind)
-            HStack(spacing: 10) {
-                RoutePicker()
-                    .frame(width: 28, height: 28)
-                HubGlassButton(title: state.swapLabel, tint: HubTint.face(.output, progress: 0.5, muted: false)) {
-                    state.swapSpeaker()
-                }
-            }
-            .padding(.vertical, 8)
-            ForEach(state.outputDevices) { device in
-                let selected = device.uid == state.outputUID
-                HubFact(label: selected ? "Now" : "", value: device.name, secondary: device.transport.title)
-                    .contentShape(Rectangle())
-                    .overlay(ImmediatePress(action: { state.selectOutput(device) }))
-            }
         }
     }
 
@@ -187,21 +122,23 @@ struct HubSystem: View {
                     Text(state.desk.power.snapshot.chargeLabel)
                     Text("Thermal \(state.desk.power.snapshot.thermal.title)")
                         .foregroundStyle(state.desk.power.snapshot.thermal.isException ? .orange : .secondary)
-                    Text("\(state.desk.workingCount) agents")
+                    Text(state.desk.timer.running ? "Hour · \(state.desk.timer.readout)" : state.harnessName)
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
                 Spacer()
             }
-            HStack(spacing: 8) {
-                ForEach(PowerMode.allCases) { mode in
-                    HubGlassButton(
-                        title: mode.title,
-                        selected: state.desk.powerMode == mode
-                    ) {
-                        state.desk.powerMode = mode
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(PowerMode.allCases) { mode in
+                        HubGlassButton(
+                            title: mode.title,
+                            selected: state.desk.powerMode == mode
+                        ) {
+                            state.desk.powerMode = mode
+                        }
+                        .help(mode.summary)
                     }
-                    .help(mode.summary)
                 }
             }
         }

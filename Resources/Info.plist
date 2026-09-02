@@ -29,9 +29,9 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Knurl reads the current track in Music and can start one of your playlists. Play, pause, and skip still use the system media keys.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Knurl listens only while you hold Talk or ⌃⌥M, then pastes the words into the app you were in. Audio never leaves this Mac.</string>
+	<string>Knurl listens only while you hold Flow or ⌃⌥M, then pastes the words into the app you were in. Audio never leaves this Mac.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Knurl turns speech into text on this Mac while you hold Talk. Nothing is sent to a server.</string>
+	<string>Knurl turns speech into text on this Mac while you hold Flow. Nothing is sent to a server.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Knurl talks to the iPhone crown on your Wi-Fi or personal hotspot. Nothing leaves the LAN.</string>
 	<key>NSBonjourServices</key>
