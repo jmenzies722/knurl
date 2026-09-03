@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 final class DialHostingView<Content: View>: NSHostingView<Content> {
@@ -282,6 +283,28 @@ final class HUDPanel {
     /// stays as small as possible.
     /// Re-docks the pill after a state change that alters its width, such as
     /// Flow starting or stopping.
+    /// Re-measures the expanded panel and animates to the new height.
+    ///
+    /// The dial changes height whenever its content does — a face with a
+    /// device list is taller than one without, Flow adds a transcript. Without
+    /// this the window keeps its old frame and the content is clipped or
+    /// floats in dead space.
+    func resizeExpanded() {
+        guard let panel, AppDelegate.shared?.state.isPresented == true else { return }
+        let frame = dockedFrame(expanded: true)
+        guard abs(frame.height - panel.frame.height) > 0.5
+            || abs(frame.width - panel.frame.width) > 0.5
+        else { return }
+        suppressMove = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(frame, display: true)
+        } completionHandler: {
+            Task { @MainActor in self.suppressMove = false }
+        }
+    }
+
     func refreshPill() {
         guard let panel, AppDelegate.shared?.state.isPresented != true else { return }
         dock(panel, expanded: false)

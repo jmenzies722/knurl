@@ -1,3 +1,4 @@
+import AppKit
 import KnurlCore
 import SwiftUI
 
@@ -285,11 +286,14 @@ struct NotchView: View {
 
     // MARK: Shelf
     //
-    // The click state: everything hover shows, plus the one control that
-    // needs room — a scrubber for music, the length for the hour.
+    // The click state, and the reason the menu bar item can go away on a
+    // notched Mac. Everything a status item holds — what is playing, the
+    // controls, the way into the Hub and the way out of the app — plus the one
+    // thing no other notch has: a dial you can actually turn, on the five
+    // faces, without opening anything.
 
     private var glanceShelf: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 12) {
                 switch subject {
                 case .flow: flowLead
@@ -298,9 +302,9 @@ struct NotchView: View {
                 case .dial: dialLead
                 }
                 Spacer(minLength: 4)
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        if subject == .media {
+                if subject == .media {
+                    GlassEffectContainer(spacing: 8) {
+                        HStack(spacing: 8) {
                             notchGlassButton("backward.fill", "Previous") { state.skip(-1) }
                             notchGlassButton(
                                 state.music.isPlaying ? "pause.fill" : "play.fill",
@@ -308,19 +312,90 @@ struct NotchView: View {
                             ) { state.collapsedPlay() }
                             notchGlassButton("forward.fill", "Next") { state.skip(1) }
                         }
-                        notchGlassButton("square.grid.2x2.fill", "Open the Hub") { state.presentHub() }
-                        notchGlassButton("xmark", "Close") { state.collapseNotch() }
                     }
                 }
             }
+
             if let progress = housingProgress {
                 KnurlMeter(progress: progress, tint: housingTint, height: 3, showsTrack: true)
             }
+
+            Rectangle()
+                .fill(.white.opacity(0.08))
+                .frame(height: 1)
+
+            deskRow
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 12)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(whisper.line). \(whisper.detail)")
+    }
+
+    /// A working crown, the five faces, and the exits.
+    private var deskRow: some View {
+        HStack(spacing: 14) {
+            DeskCrown(
+                progress: state.controlProgress,
+                tint: DialSwatch.tint(state.control, state: state),
+                symbol: state.control.symbol,
+                readout: state.controlReadout,
+                caption: state.control.title,
+                ticks: state.control == .output ? max(state.outputDevices.count, 2) : 11,
+                size: 78,
+                lively: state.desk.allowsDecorativeMotion,
+                metal: .graphite,
+                onTurn: { state.applyControl($0, settleOutput: false) },
+                onConfirm: { state.confirmDial() },
+                onEnded: { if state.control == .output { state.finishOutputTurn() } }
+            )
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    ForEach(DialMode.allCases) { mode in
+                        faceKey(mode)
+                    }
+                }
+                HStack(spacing: 8) {
+                    notchTextButton("Hub") { state.presentHub() }
+                    notchTextButton("Settings") { AppDelegate.shared?.openSettings() }
+                    Spacer(minLength: 0)
+                    notchTextButton("Quit") { NSApp.terminate(nil) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func faceKey(_ mode: DialMode) -> some View {
+        let selected = state.control == mode
+        let tint = DialSwatch.tint(mode, state: state)
+        return Image(systemName: mode.symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(selected ? .white : .white.opacity(0.55))
+            .frame(width: 30, height: 26)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? tint.opacity(0.9) : .white.opacity(0.08))
+            }
+            .overlay(ImmediatePress {
+                if selected { state.confirmDial() } else { state.selectControl(mode) }
+            })
+            .accessibilityLabel(mode.title)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func notchTextButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .overlay(ImmediatePress(action: action))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(title)
     }
 
     // MARK: Flow

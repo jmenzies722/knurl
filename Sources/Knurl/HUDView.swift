@@ -241,6 +241,7 @@ struct HUDView: View {
                 toolControls
             }
             toolsRow
+            deskStrip
             roomSatellites
         }
         .padding(18)
@@ -262,10 +263,99 @@ struct HUDView: View {
         }
         .shadow(color: tint.opacity(0.22), radius: 34, y: 10)
         .shadow(color: .black.opacity(0.45), radius: 26, y: 14)
-        .animation(.easeInOut(duration: 0.5), value: state.control)
+        // One curve for everything that changes the panel's height, so the
+        // window and its contents move together rather than the content
+        // snapping and the frame catching up behind it.
+        .animation(KnurlMotion.settle, value: state.control)
+        .animation(KnurlMotion.settle, value: state.activeTool)
+        .animation(KnurlMotion.settle, value: state.voice.isActive)
+        .animation(KnurlMotion.settle, value: state.desk.tools.awake)
+        .animation(KnurlMotion.settle, value: state.roomDimmed)
+        .onChange(of: state.control) { HUDPanel.shared.resizeExpanded() }
+        .onChange(of: state.activeTool) { HUDPanel.shared.resizeExpanded() }
+        .onChange(of: state.voice.isActive) { HUDPanel.shared.resizeExpanded() }
+        .onChange(of: state.inputDevices.count) { HUDPanel.shared.resizeExpanded() }
+        .onChange(of: state.outputDevices.count) { HUDPanel.shared.resizeExpanded() }
     }
 
     /// One chip per tool. Adding a tool adds a case to DeskTool, not a face.
+    /// The desk tools, on the surface you summon without leaving your work.
+    ///
+    /// These lived only on the Hub's Tools page, which means reaching them
+    /// meant opening a window — the exact thing the side dial exists to avoid.
+    /// Every one is a real system call and none of them asks for a permission:
+    /// a power assertion, a brightness write, an NSWorkspace hide, a Core
+    /// Audio swap.
+    private var deskStrip: some View {
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 6) {
+                deskKey(
+                    state.desk.tools.awake ? "eye.fill" : "eye",
+                    "Keep awake",
+                    on: state.desk.tools.awake,
+                    tint: DialSwatch.bright
+                ) { state.desk.tools.toggleAwake() }
+
+                deskKey(
+                    state.roomDimmed ? "sun.max.fill" : "moon.fill",
+                    state.roomDimmed ? "Restore lights" : "Dim the room",
+                    on: state.roomDimmed,
+                    tint: DialSwatch.bright
+                ) { state.toggleRoomDim() }
+
+                deskKey(
+                    "rectangle.on.rectangle.slash",
+                    "Clear the room",
+                    on: false,
+                    tint: DialSwatch.output
+                ) { state.desk.tools.clearTheRoom() }
+
+                deskKey(
+                    "arrow.triangle.2.circlepath",
+                    state.swapLabel,
+                    on: false,
+                    tint: DialSwatch.output
+                ) { state.swapSpeaker() }
+
+                deskKey(
+                    "rectangle.split.2x2",
+                    "Snap the windows",
+                    on: state.desk.windows.lastPreset != nil,
+                    tint: DialSwatch.output
+                ) {
+                    state.hubPage = .workspace
+                    state.presentHub()
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func deskKey(
+        _ symbol: String,
+        _ label: String,
+        on: Bool,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .semibold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(on ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.white.opacity(0.62)))
+            .frame(width: 38, height: 32)
+            .glassEffect(on ? .regular.tint(tint.opacity(0.5)) : .regular, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(on ? tint.opacity(0.7) : .clear, lineWidth: 1)
+            }
+            .contentTransition(.symbolEffect(.replace))
+            .overlay(ImmediatePress(action: action))
+            .help(label)
+            .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            .accessibilityLabel(label)
+    }
+
     private var toolsRow: some View {
         HStack(spacing: 6) {
             ForEach(DeskTool.allCases) { tool in

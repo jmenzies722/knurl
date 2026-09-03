@@ -87,6 +87,13 @@ struct SettingsView: View {
                     isOn: state.hapticOn
                 ) { state.setHaptic($0) }
                 toggle(
+                    "Show in the menu bar",
+                    detail: state.hasNotchHousing
+                        ? "Off by default on this Mac: the notch is already the parked Knurl, and a status item beside it says the same things twice."
+                        : "This Mac has no notch, so the menu bar is where Knurl parks.",
+                    isOn: state.showsMenuBarItem
+                ) { state.setShowsMenuBarItem($0) }
+                toggle(
                     "Launch at login",
                     detail: "The desk is parked at cold start — nothing pops on the screen.",
                     isOn: state.launchesAtLogin

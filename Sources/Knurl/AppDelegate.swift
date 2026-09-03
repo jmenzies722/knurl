@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyCenter.shared.start()
         CrownServer.shared.start()
         state.hotkeyError = HotkeyCenter.shared.lastError
+        // First launch decides from the hardware: a Mac with a notch parks in
+        // the notch, so a status item beside it would be a second parked
+        // Knurl saying the same things.
+        if !Preferences.hasChosenMenuBar {
+            Preferences.menuBarItem = !NotchPanel.shared.hasHousing
+        }
+        state.showsMenuBarItem = Preferences.menuBarItem
         StatusBar.shared.attach(
             target: self,
             show: #selector(showDial),

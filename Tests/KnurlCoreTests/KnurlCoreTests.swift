@@ -40,7 +40,7 @@ import Testing
             shelf: NotchMath.flowShelfHeight
         )
         #expect(flow.maxY == housing.maxY)
-        #expect(flow.height > expanded.height)
+        #expect(flow.height > housing.height)
         #expect(flow.height - housing.height == NotchMath.shelfGap + NotchMath.flowShelfHeight)
     }
 }
@@ -586,10 +586,19 @@ struct NotchStageTests {
         #expect(NotchStage.rest.height == 0)
     }
 
-    @Test func stagesGrowMonotonically() {
-        let order: [NotchStage] = [.rest, .glance, .hover, .shelf, .flow]
-        for (a, b) in zip(order, order.dropFirst()) {
+    @Test func closedStagesGrowAndOpenStagesClearTheClosedOnes() {
+        // Growth is only monotonic up to `hover`. Past that the stages are
+        // siblings sized to their own content, not steps on a ladder: the
+        // shelf is the tallest because it carries the dial, the faces and the
+        // exits — it is the notch's answer to a menu bar item. Asserting a
+        // total order here would be asserting a design nobody chose.
+        let closed: [NotchStage] = [.rest, .glance, .hover]
+        for (a, b) in zip(closed, closed.dropFirst()) {
             #expect(a.height < b.height, "\(a) should be shorter than \(b)")
+        }
+        for open in [NotchStage.shelf, .flow] {
+            #expect(open.height > NotchStage.hover.height)
+            #expect(open.flare >= NotchStage.hover.flare - 1)
         }
         #expect(NotchStage.rest.flare < NotchStage.hover.flare)
         #expect(NotchStage.rest.topCornerRadius < NotchStage.hover.topCornerRadius)

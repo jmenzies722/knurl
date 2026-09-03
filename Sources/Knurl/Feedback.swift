@@ -14,6 +14,7 @@ enum Preferences {
     private static let hubOrderKey = "knurl.hub.order"
     private static let clipboardShelfKey = "knurl.clipboard.shelf"
     private static let weatherKey = "knurl.weather.enabled"
+    private static let menuBarKey = "knurl.menubar.item"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -64,6 +65,27 @@ enum Preferences {
     static var weatherEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: weatherKey) }
         set { UserDefaults.standard.set(newValue, forKey: weatherKey) }
+    }
+
+    /// Whether to keep a menu bar item.
+    ///
+    /// Defaults to off on a Mac with a notch, because there the notch *is* the
+    /// menu bar presence — a status item beside it is a second parked Knurl
+    /// saying the same things. Macs without a housing keep it, since otherwise
+    /// the Dock icon is the only way in.
+    static var menuBarItem: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: menuBarKey) == nil { return true }
+            return UserDefaults.standard.bool(forKey: menuBarKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: menuBarKey) }
+    }
+
+    /// Whether the person has ever expressed a preference. Until they have,
+    /// the app picks the default from the hardware — which it can only do on
+    /// the main actor, so that decision lives in AppDelegate rather than here.
+    static var hasChosenMenuBar: Bool {
+        UserDefaults.standard.object(forKey: menuBarKey) != nil
     }
 
     static var powerMode: PowerMode {

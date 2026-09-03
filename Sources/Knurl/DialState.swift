@@ -63,6 +63,7 @@ final class DialState {
         didSet { Preferences.hubOrder = hubOrder }
     }
     var launchesAtLogin = LoginItem.isEnabled
+    var showsMenuBarItem = Preferences.menuBarItem
     var loginItemError: String?
     var inputUID = ""
     var inputDevices: [AudioDevice] = []
@@ -396,6 +397,12 @@ final class DialState {
         inputs.select(device.id)
         refreshMeters()
         DialTick.play()
+    }
+
+    func setShowsMenuBarItem(_ on: Bool) {
+        showsMenuBarItem = on
+        Preferences.menuBarItem = on
+        StatusBar.shared.setVisible(on)
     }
 
     func setLaunchesAtLogin(_ on: Bool) {

@@ -27,7 +27,10 @@ public enum NotchStage: String, Sendable, CaseIterable {
         case .rest: 0
         case .glance: 5
         case .hover: 60
-        case .shelf: 80
+        // The shelf carries the whole desk: what is playing, a dial you can
+        // actually turn, the five faces, and the way out. It is the notch's
+        // answer to a menu bar item, so it has to hold what one holds.
+        case .shelf: 184
         case .flow: 132
         }
     }
@@ -46,7 +49,7 @@ public enum NotchStage: String, Sendable, CaseIterable {
         // Wider than hover: the shelf carries cover art, a title, three
         // transport keys and two more besides. Sized to its content rather
         // than to a round number.
-        case .shelf: 118
+        case .shelf: 156
         case .flow: 104
         }
     }

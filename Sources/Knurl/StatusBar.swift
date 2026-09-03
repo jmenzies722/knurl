@@ -14,7 +14,24 @@ final class StatusBar {
 
     private init() {}
 
+    private var attachment: (target: AnyObject, show: Selector, hub: Selector, settings: Selector, quit: Selector)?
+
+    /// Adds or removes the status item to match the preference.
+    func setVisible(_ visible: Bool) {
+        if visible {
+            guard item == nil, let a = attachment else { return }
+            attach(target: a.target, show: a.show, hub: a.hub, settings: a.settings, quit: a.quit)
+        } else {
+            closeShelf()
+            if let item { NSStatusBar.system.removeStatusItem(item) }
+            item = nil
+            host = nil
+        }
+    }
+
     func attach(target: AnyObject, show: Selector, hub: Selector, settings: Selector, quit: Selector) {
+        attachment = (target, show, hub, settings, quit)
+        guard Preferences.menuBarItem else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
         button.image = nil
