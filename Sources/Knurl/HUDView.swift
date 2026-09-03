@@ -14,6 +14,7 @@ struct HUDView: View {
                 collapsed
             }
         }
+        .environment(\.knurlOnScreen, state.hudVisible)
     }
 
     /// Parked state: a pill above the Dock, in three sizes.
@@ -32,7 +33,7 @@ struct HUDView: View {
             .buttonStyle(.plain)
             .focusable(false)
 
-            if state.voice.isListening {
+            if state.voice.isActive {
                 flowLane
                     .transition(.opacity)
             } else if state.pillShowsPages {
@@ -40,14 +41,22 @@ struct HUDView: View {
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             } else {
                 if state.pillHovered {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(state.controlTitle)
-                            .font(.caption.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(state.controlTitle.uppercased())
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.1)
+                            .foregroundStyle(.white.opacity(0.85))
                             .lineLimit(1)
                         Text(state.collapsedLine)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.5))
                             .lineLimit(1)
+                        KnurlMeter(
+                            progress: state.controlProgress,
+                            tint: DialSwatch.tint(state.control, state: state),
+                            height: 2.5,
+                            showsTrack: false
+                        )
                     }
                     .frame(width: 108, alignment: .leading)
                     .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -78,17 +87,33 @@ struct HUDView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .glassEffect(
+            .regular.tint(DialSwatch.tint(state.control, state: state).opacity(0.12)).interactive(),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule().strokeBorder(
+                DialSwatch.tint(state.control, state: state)
+                    .opacity(state.pillHovered || state.voice.isActive ? 0.55 : 0.22),
+                lineWidth: 1
+            )
+        }
+        .shadow(
+            color: DialSwatch.tint(state.control, state: state)
+                .opacity(state.voice.isActive ? 0.45 : 0.18),
+            radius: 18,
+            y: 5
+        )
         .overlay(alignment: .leading) {
-            if state.pillHovered, !state.voice.isListening {
+            if state.pillHovered, !state.voice.isActive {
                 MoveBar().frame(width: 12).transition(.opacity)
             }
         }
-        .opacity(state.pillHovered || state.voice.isListening ? 1 : 0.62)
+        .opacity(state.pillHovered || state.voice.isActive ? 1 : 0.62)
         .animation(.spring(duration: 0.26, bounce: 0.1), value: state.pillHovered)
-        .animation(.spring(duration: 0.3, bounce: 0.12), value: state.voice.isListening)
+        .animation(.spring(duration: 0.3, bounce: 0.12), value: state.voice.isActive)
         .animation(.spring(duration: 0.28, bounce: 0.12), value: state.pillShowsPages)
-        .onChange(of: state.voice.isListening) { HUDPanel.shared.refreshPill() }
+        .onChange(of: state.voice.isActive) { HUDPanel.shared.refreshPill() }
     }
 
     /// The six Hub pages, inline. Picking one opens the Hub on that page, so
@@ -126,13 +151,14 @@ struct HUDView: View {
     /// What the pill becomes while Flow is listening: level, words, destination,
     /// and one obvious way to stop.
     private var flowLane: some View {
-        HStack(spacing: 10) {
-            FlowWaveform(levels: state.voice.levels, tint: .accentColor, bars: 12)
-                .frame(width: 56)
+        HStack(spacing: 8) {
+            FlowWaveform(levels: state.voice.levels, tint: DialSwatch.mic, bars: 12)
+                .frame(width: 52)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(state.voice.preview.isEmpty ? "Listening…" : state.voice.preview)
-                    .font(.caption.weight(.medium))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .truncationMode(.head)
                     .contentTransition(.opacity)
@@ -140,11 +166,17 @@ struct HUDView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .overlay(ImmediatePress(action: { state.jumpToHarness() }))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Jump to \(state.harnessName)")
             }
-            .frame(width: 150, alignment: .leading)
+            .frame(width: 132, alignment: .leading)
 
+            pillButton(symbol: "xmark", tint: .secondary, label: "Cancel Flow") {
+                state.cancelTalk()
+            }
             pillButton(symbol: "stop.fill", tint: .accentColor, label: "Stop and paste") {
-                state.toggleTalk(presentHUD: false)
+                state.endTalk()
             }
         }
     }
@@ -157,21 +189,35 @@ struct HUDView: View {
     ) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+            .foregroundStyle(
+                tint == .secondary ? AnyShapeStyle(Color.white.opacity(0.62)) : AnyShapeStyle(tint)
+            )
             .frame(width: 30, height: 30)
             .glassEffect(.regular, in: Circle())
+            .overlay { Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1) }
             .overlay(ImmediatePress(action: action))
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(label)
     }
 
+    /// The dial panel. Glass, because it floats over whatever you were doing
+    /// — but glass tinted by the live face, with a rim that carries the same
+    /// colour, so the panel belongs to the dial inside it rather than being a
+    /// neutral tray the dial happens to sit on.
     private var expanded: some View {
-        VStack(spacing: 16) {
+        let tint = DialSwatch.tint(state.control, state: state)
+        return VStack(spacing: 15) {
             header
             if !state.desk.attention.isEmpty {
-                Text("\(state.desk.attention[0].provider.title) needs you")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+                HStack(spacing: 6) {
+                    KnurlPip(tint: KnurlPalette.warn, live: true, size: 6)
+                    Text("\(state.desk.attention[0].provider.title) needs you")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(KnurlPalette.warn)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background { Capsule().fill(KnurlPalette.warn.opacity(0.14)) }
             }
             if state.activeTool != nil {
                 ToolCrown(state: state)
@@ -187,15 +233,36 @@ struct HUDView: View {
                 }
                 librarySources
                 outputRoster
+                inputRoster
             } else {
+                if state.voice.isActive {
+                    toolFlowStrip
+                }
                 toolControls
             }
             toolsRow
             roomSatellites
         }
         .padding(18)
-        .frame(width: 400)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .frame(width: 404)
+        .glassEffect(
+            .regular.tint(tint.opacity(0.10)).interactive(),
+            in: RoundedRectangle(cornerRadius: 34, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [tint.opacity(0.45), .white.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .shadow(color: tint.opacity(0.22), radius: 34, y: 10)
+        .shadow(color: .black.opacity(0.45), radius: 26, y: 14)
+        .animation(.easeInOut(duration: 0.5), value: state.control)
     }
 
     /// One chip per tool. Adding a tool adds a case to DeskTool, not a face.
@@ -213,13 +280,17 @@ struct HUDView: View {
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .contentTransition(.numericText())
                 }
-                .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .padding(.horizontal, 10)
+                .foregroundStyle(active ? AnyShapeStyle(Color.white) : AnyShapeStyle(Color.white.opacity(0.6)))
+                .padding(.horizontal, 11)
                 .padding(.vertical, 7)
                 .glassEffect(
-                    active ? .regular.tint(tool.tint.opacity(0.4)) : .regular,
+                    active ? .regular.tint(tool.tint.opacity(0.5)) : .regular,
                     in: Capsule()
                 )
+                .overlay {
+                    Capsule().strokeBorder(active ? tool.tint.opacity(0.7) : .clear, lineWidth: 1)
+                }
+                .shadow(color: active ? tool.tint.opacity(0.4) : .clear, radius: 9, y: 2)
                 .overlay(ImmediatePress {
                     state.selectTool(active ? nil : tool)
                 })
@@ -271,6 +342,34 @@ struct HUDView: View {
                         .overlay(ImmediatePress { state.resetHour() })
                         .accessibilityLabel("Reset the Hour")
                 }
+                Image(systemName: state.roomDimmed ? "sun.max.fill" : "moon.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(state.roomDimmed ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .frame(width: 40, height: 32)
+                    .glassEffect(
+                        state.roomDimmed ? .regular.tint(DialSwatch.bright.opacity(0.4)) : .regular,
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    )
+                    .overlay(ImmediatePress { state.toggleRoomDim() })
+                    .accessibilityLabel(state.roomDimmed ? "Restore lights" : "Dim the room")
+            }
+        case .power:
+            HStack(spacing: 8) {
+                ForEach(PowerMode.allCases) { mode in
+                    let selected = state.desk.powerMode == mode
+                    Text(mode.title)
+                        .font(.caption.weight(.semibold))
+                        .frame(height: 32)
+                        .frame(maxWidth: .infinity)
+                        .glassEffect(
+                            selected ? .regular.tint(DialSwatch.output.opacity(0.4)) : .regular,
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        )
+                        .overlay(ImmediatePress { state.desk.powerMode = mode })
+                        .help(mode.summary)
+                        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityLabel(mode.title)
+                }
             }
         case nil:
             EmptyView()
@@ -279,16 +378,22 @@ struct HUDView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.controlTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary.opacity(0.92))
+            KnurlPip(
+                tint: DialSwatch.tint(state.control, state: state),
+                live: state.music.isPlaying || state.voice.isActive || state.desk.timer.running,
+                size: 7
+            )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(state.controlTitle.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
                     .contentTransition(.opacity)
                 if state.control == .media, !state.music.line.isEmpty {
                     Text(state.music.line)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                 }
             }
@@ -332,25 +437,26 @@ struct HUDView: View {
                 // is a chip below. Only the clock is new information here.
                 if state.music.hasTrack, state.music.canSeek {
                     Text(mediaClock)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
+                        .font(.knurlNumeral(15))
                         .contentTransition(.numericText())
-                        .foregroundStyle(.primary.opacity(0.9))
+                        .foregroundStyle(.white.opacity(0.9))
                 } else {
                     Text(controlSubtitle)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
                 }
             } else {
                 Text(state.controlReadout)
-                    .font(.title3.weight(.semibold))
+                    .font(.knurlNumeral(19))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
+                    .foregroundStyle(.white.opacity(0.95))
                     .contentTransition(.numericText())
-                Text(controlSubtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(controlSubtitle.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(.white.opacity(0.45))
                     .lineLimit(1)
             }
         }
@@ -370,7 +476,7 @@ struct HUDView: View {
         case .brightness:
             return "Built-in display"
         case .mic:
-            if state.voice.isListening { return "Listening" }
+            if state.voice.isActive { return "Listening" }
             return state.inputName
         case .output:
             return state.outputKind
@@ -384,8 +490,14 @@ struct HUDView: View {
     private var talkBar: some View {
         if state.control == .mic {
             VStack(spacing: 8) {
-                if state.voice.isListening || !state.voice.preview.isEmpty {
-                    Text(state.voice.preview.isEmpty ? "Listening…" : state.voice.preview)
+                Text("→ \(state.harnessName)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .overlay(ImmediatePress(action: { state.jumpToHarness() }))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Words land in \(state.harnessName)")
+                if state.voice.isActive || !state.voice.preview.isEmpty || !state.voice.lastTranscript.isEmpty {
+                    Text(flowLine)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary.opacity(0.92))
                         .multilineTextAlignment(.center)
@@ -393,17 +505,29 @@ struct HUDView: View {
                         .frame(maxWidth: .infinity)
                 }
                 HStack(spacing: 8) {
-                    Image(systemName: state.voice.isListening ? "waveform" : "mic.fill")
-                        .symbolEffect(.variableColor.iterative, isActive: state.voice.isListening)
-                    Text(state.voice.isListening ? "Release to paste" : "Hold Flow  ⌃⌥M")
+                    Image(systemName: state.voice.isActive ? "waveform" : "mic.fill")
+                        .symbolEffect(.variableColor.iterative, isActive: state.voice.isActive)
+                    Text(state.voice.isActive ? "Release to paste" : "Hold Flow  ⌃⌥M")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .foregroundStyle(.primary.opacity(0.92))
+                .padding(.vertical, 12)
+                .foregroundStyle(.white.opacity(0.95))
                 .glassEffect(
-                    .regular.tint(DialSwatch.mic.opacity(state.voice.isListening ? 0.5 : 0.22)),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .regular.tint(DialSwatch.mic.opacity(state.voice.isActive ? 0.55 : 0.24)),
+                    in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(
+                            DialSwatch.mic.opacity(state.voice.isActive ? 0.8 : 0.25),
+                            lineWidth: 1
+                        )
+                }
+                .shadow(
+                    color: DialSwatch.mic.opacity(state.voice.isActive ? 0.45 : 0),
+                    radius: 16,
+                    y: 3
                 )
                 .overlay(
                     ImmediateHold(
@@ -411,6 +535,27 @@ struct HUDView: View {
                         up: { state.endTalk() }
                     )
                 )
+                HStack(spacing: 8) {
+                    if state.voice.isActive {
+                        Text("Cancel")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .glassEffect(.regular, in: Capsule())
+                            .overlay(ImmediatePress(action: { state.cancelTalk() }))
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityLabel("Cancel Flow")
+                    } else if !state.voice.lastTranscript.isEmpty {
+                        Text("Resend")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .glassEffect(.regular, in: Capsule())
+                            .overlay(ImmediatePress(action: { state.resendTalk() }))
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityLabel("Resend last Flow")
+                    }
+                }
                 if let message = state.voice.message {
                     Text(message)
                         .font(.caption)
@@ -418,12 +563,47 @@ struct HUDView: View {
                         .multilineTextAlignment(.center)
                 }
             }
-            .onDisappear {
-                if state.flowOrigin == .hud {
-                    state.endTalk()
-                }
-            }
         }
+    }
+
+    private var toolFlowStrip: some View {
+        HStack(spacing: 8) {
+            Text(flowLine)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.head)
+            Text("→ \(state.harnessName)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .overlay(ImmediatePress(action: { state.jumpToHarness() }))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Jump to \(state.harnessName)")
+            Spacer(minLength: 0)
+            Text("Cancel")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular, in: Capsule())
+                .overlay(ImmediatePress(action: { state.cancelTalk() }))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Cancel Flow")
+            Text("Release")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular.tint(DialSwatch.mic.opacity(0.4)), in: Capsule())
+                .overlay(ImmediatePress(action: { state.endTalk() }))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Stop and paste")
+        }
+    }
+
+    private var flowLine: String {
+        if !state.voice.preview.isEmpty { return state.voice.preview }
+        if state.voice.isActive { return "Listening…" }
+        if !state.voice.lastTranscript.isEmpty { return state.voice.lastTranscript }
+        return ""
     }
 
     /// Three tiers, so the eye lands on play first: mode toggles are small and
@@ -442,11 +622,29 @@ struct HUDView: View {
                 .font(.system(size: 17, weight: .bold))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(.white)
-                .frame(width: 84, height: 44)
-                .glassEffect(
-                    .regular.tint(DialSwatch.stable(state.control).opacity(0.62)),
-                    in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-                )
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 88, height: 46)
+                .background {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    DialSwatch.stable(state.control),
+                                    DialSwatch.stable(state.control).opacity(0.72),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
+                .overlay(alignment: .top) {
+                    Capsule()
+                        .fill(.white.opacity(0.35))
+                        .frame(height: 1)
+                        .padding(.horizontal, 12)
+                        .blendMode(.plusLighter)
+                }
+                .shadow(color: DialSwatch.stable(state.control).opacity(0.5), radius: 14, y: 4)
                 .overlay(ImmediatePress(action: { state.collapsedPlay() }))
             transportButton("forward.fill", tier: .secondary) {
                 state.skip(1)
@@ -494,11 +692,22 @@ struct HUDView: View {
             // off state renders red and reads as an error.
             .symbolRenderingMode(.monochrome)
             .frame(width: tier.size.width, height: tier.size.height)
-            .foregroundStyle(selected ? AnyShapeStyle(DialSwatch.stable(state.control)) : AnyShapeStyle(.secondary))
+            .foregroundStyle(
+                selected
+                    ? AnyShapeStyle(DialSwatch.stable(state.control))
+                    : AnyShapeStyle(Color.white.opacity(0.6))
+            )
             .glassEffect(
                 selected ? .regular.tint(DialSwatch.stable(state.control).opacity(0.34)) : .regular,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        selected ? DialSwatch.stable(state.control).opacity(0.55) : .clear,
+                        lineWidth: 1
+                    )
+            }
             .overlay(ImmediatePress(action: action))
     }
 
@@ -515,27 +724,41 @@ struct HUDView: View {
     private func satellite(_ mode: DialMode, number: Int) -> some View {
         let selected = state.control == mode
         let tint = DialSwatch.tint(mode, state: state)
-        return VStack(spacing: 3) {
+        return VStack(spacing: 4) {
             Image(systemName: satelliteSymbol(mode))
                 .font(.system(size: 13, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .symbolEffect(.bounce, value: selected)
                 .foregroundStyle(tint)
             Text(satelliteLabel(mode))
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white.opacity(selected ? 0.95 : 0.6))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+            // A hairline of the face's own level. Five identical chips could
+            // not tell you that Volume was at 12% without being clicked.
+            KnurlMeter(
+                progress: satelliteProgress(mode),
+                tint: selected ? tint : tint.opacity(0.5),
+                height: 2.5,
+                showsTrack: false
+            )
+            .padding(.horizontal, 8)
         }
         .help("\(mode.title) · press \(number)")
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .foregroundStyle(.primary.opacity(0.9))
+        .padding(.vertical, 9)
         .glassEffect(
             selected
                 ? .regular.tint(tint.opacity(0.45)).interactive()
-                : .regular.tint(tint.opacity(0.12)).interactive(),
+                : .regular.tint(tint.opacity(0.10)).interactive(),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(selected ? tint.opacity(0.65) : .clear, lineWidth: 1)
+        }
+        .shadow(color: selected ? tint.opacity(0.4) : .clear, radius: 10, y: 2)
         .modifier(SelectedFaceGlass(active: selected, namespace: faces))
         .overlay(
             ImmediatePress {
@@ -548,12 +771,22 @@ struct HUDView: View {
         )
     }
 
+    private func satelliteProgress(_ mode: DialMode) -> Double {
+        switch mode {
+        case .volume: state.volumeProgress
+        case .brightness: Double(state.brightnessPercent) / 100
+        case .mic: Double(state.micPercent) / 100
+        case .output: state.outputProgress
+        case .media: state.music.displayedPlayhead()
+        }
+    }
+
     private func satelliteSymbol(_ mode: DialMode) -> String {
         switch mode {
         case .volume: state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
         case .brightness: "sun.max.fill"
         case .mic:
-            if state.voice.isListening { "waveform" }
+            if state.voice.isActive { "waveform" }
             else if state.isMicMuted { "mic.slash.fill" }
             else { "mic.fill" }
         case .output: "hifispeaker.fill"
@@ -569,28 +802,41 @@ struct HUDView: View {
     }
 
     @ViewBuilder
-    private var outputRoster: some View {
-        if state.control == .output {
-            VStack(alignment: .leading, spacing: 8) {
-                HomePodRouteButton(nearby: OutputWatch.shared.airPlayNearby)
-                HStack(spacing: 8) {
-                    Text(state.swapLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
+    private var inputRoster: some View {
+        if state.control == .mic, !state.inputDevices.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(state.inputDevices) { device in
+                        let selected = device.uid == state.inputUID
+                        HStack(spacing: 6) {
+                            Image(systemName: device.transport.symbol)
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(device.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
                         .glassEffect(
-                            .regular.tint(DialSwatch.output.opacity(0.36)).interactive(),
+                            selected
+                                ? .regular.tint(DialSwatch.mic.opacity(0.36))
+                                : .regular,
                             in: Capsule()
                         )
-                        .overlay(ImmediatePress(action: { state.swapSpeaker() }))
-                    if let memory = state.outputMemoryLine {
-                        Text(memory)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        .overlay(ImmediatePress { state.selectInput(device) })
+                        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityLabel(device.name)
                     }
                 }
             }
+            .frame(height: 36)
+        }
+    }
+
+    @ViewBuilder
+    private var outputRoster: some View {
+        if state.control == .output {
+            OutputDestinationRail(state: state, compact: true)
         }
     }
 
@@ -604,183 +850,99 @@ struct HUDView: View {
         switch mode {
         case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
         case .brightness: "\(state.brightnessPercent)"
-        case .mic: state.voice.isListening ? "Flow" : (state.isMicMuted ? "Muted" : "Mic")
+        case .mic: state.voice.isActive ? "Flow" : (state.isMicMuted ? "Muted" : "Mic")
         case .output: state.outputKind
         case .media: mediaChipLabel
         }
     }
 }
 
+/// The HUD's crown.
+///
+/// This used to be a second, hand-maintained copy of the dial — its own
+/// bezel, its own tick ring, its own needle, drifting from the Hub's version
+/// every time either changed. It is now the same `DeskCrown`, forced to the
+/// graphite skin because the HUD floats over your work, with cover art handed
+/// in for Media.
 private struct CrownDial: View {
     @Bindable var state: DialState
     private let size: CGFloat = 252
 
     var body: some View {
-        let tint = DialSwatch.tint(state.control, state: state)
-        ZStack {
-            well(tint: tint)
-            TimelineView(.periodic(from: .now, by: 0.2)) { timeline in
-                let progress = liveProgress(at: timeline.date)
-                needle(progress: progress, tint: tint)
-            }
-        }
-        .frame(width: size, height: size)
-        .glassEffect(.regular.tint(tint.opacity(0.18)).interactive(), in: Circle())
-        .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    state.turnDial(at: value.location, size: CGSize(width: size, height: size))
-                }
-                .onEnded { _ in
-                    if state.control == .output {
-                        state.finishOutputTurn()
-                    }
-                }
+        DeskCrown(
+            progress: liveProgress,
+            tint: DialSwatch.tint(state.control, state: state),
+            symbol: state.control.symbol,
+            readout: readout,
+            caption: state.controlTitle,
+            ticks: state.control == .output ? max(state.outputDevices.count, 2) : 11,
+            size: size,
+            lively: state.desk.allowsDecorativeMotion,
+            metal: .graphite,
+            artwork: artwork,
+            levels: state.control == .mic && state.voice.isActive ? state.voice.levels : nil,
+            pulsing: (state.control == .media && state.music.isPlaying)
+                || (state.control == .mic && state.voice.isActive),
+            onTurn: { state.applyControl($0, settleOutput: false) },
+            onConfirm: { state.confirmDial() },
+            onEnded: { if state.control == .output { state.finishOutputTurn() } }
         )
-        .onTapGesture {
-            state.confirmDial()
-        }
-        .animation(.snappy(duration: 0.16), value: state.controlReadout)
-        .animation(.easeInOut(duration: 0.28), value: state.control)
     }
 
-    private func liveProgress(at date: Date) -> Double {
+    private var liveProgress: Double {
         if state.control == .media {
-            return state.music.canSeek
-                ? state.music.displayedPlayhead(at: date)
-                : 0
+            return state.music.canSeek ? state.music.displayedPlayhead() : 0
         }
         return state.usesRingGauge ? state.controlProgress : max(state.controlProgress, 0.12)
     }
 
-    private func well(tint: Color) -> some View {
-        ZStack {
-            Circle()
-                .fill(.black.opacity(0.22))
-            MeshGradient(
-                width: 3,
-                height: 3,
-                points: [
-                    .init(0, 0), .init(0.5, 0), .init(1, 0),
-                    .init(0, 0.5), .init(0.5, 0.5), .init(1, 0.5),
-                    .init(0, 1), .init(0.5, 1), .init(1, 1),
-                ],
-                colors: [
-                    tint.opacity(0.55), .clear, DialSwatch.bright.opacity(0.28),
-                    .clear, tint.opacity(0.18), .clear,
-                    DialSwatch.mic.opacity(0.22), .clear, DialSwatch.output.opacity(0.28),
-                ]
-            )
-            .clipShape(Circle())
-            .opacity(0.85)
-            Circle()
-                .stroke(.white.opacity(0.07), lineWidth: 20)
-                .padding(8)
-            // Dark track, not a light one: the fill has to win against a tinted
-            // well, and two similar values made the playhead unreadable.
-            Circle()
-                .trim(from: 0, to: 0.75)
-                .stroke(.black.opacity(0.38), style: StrokeStyle(lineWidth: 11, lineCap: .round))
-                .padding(16)
-                .rotationEffect(.degrees(135))
-            ForEach(0 ..< 11, id: \.self) { index in
-                Capsule()
-                    .fill(.white.opacity(index % 5 == 0 ? 0.34 : 0.12))
-                    .frame(width: 1.6, height: index % 5 == 0 ? 9 : 4)
-                    .offset(y: -92)
-                    .rotationEffect(.degrees(135 + Double(index) / 10 * 270))
-            }
-            if state.voice.isListening {
-                FlowWaveform(levels: state.voice.levels, tint: .white, bars: 16)
-                    .frame(width: 140)
-            } else {
-                artwork
-                    .frame(width: 168, height: 168)
-                    .allowsHitTesting(false)
-            }
-        }
-    }
-
-    private func needle(progress: Double, tint: Color) -> some View {
-        ZStack {
-            Circle()
-                .trim(from: 0, to: 0.75 * progress)
-                .stroke(
-                    AngularGradient(
-                        colors: [tint.opacity(0.75), tint],
-                        center: .center,
-                        startAngle: .degrees(135),
-                        endAngle: .degrees(135 + 270 * max(progress, 0.001))
-                    ),
-                    style: StrokeStyle(lineWidth: 11, lineCap: .round)
-                )
-                .padding(16)
-                .rotationEffect(.degrees(135))
-                .shadow(color: tint.opacity(state.music.isPlaying ? 0.55 : 0.2), radius: state.music.isPlaying ? 12 : 4)
-            Capsule()
-                .fill(.white)
-                .frame(width: 5, height: 24)
-                .offset(y: -92)
-                .rotationEffect(.degrees(DialMath.ringAngle(progress: progress)))
-                .shadow(color: tint.opacity(0.5), radius: 7)
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func wellCaption(progress: Double) -> String {
+    private var readout: String {
         if state.control == .media, state.music.canSeek {
-            let elapsed = progress * state.music.duration
+            let elapsed = liveProgress * state.music.duration
             return "\(DialMath.clock(elapsed))  −\(DialMath.clock(max(0, state.music.duration - elapsed)))"
         }
         return state.controlReadout
     }
 
-    @ViewBuilder
-    private var artwork: some View {
-        ZStack {
-            Circle().fill(.black.opacity(0.35))
-            if state.control == .media, let cover = state.music.cover {
-                Image(nsImage: cover)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 168, height: 168)
-                    .clipShape(Circle())
-                    .id(state.music.title)
-            } else {
-                VStack(spacing: 6) {
-                    Image(systemName: state.control.symbol)
-                        .font(.system(size: 28, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.white.opacity(0.9))
-                    Text(state.controlReadout)
-                        .font(.system(size: 34, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .minimumScaleFactor(0.4)
-                        .lineLimit(1)
-                        .foregroundStyle(.white)
-                }
-                .padding(20)
-            }
-        }
+    private var artwork: Image? {
+        guard state.control == .media, let cover = state.music.cover else { return nil }
+        return Image(nsImage: cover)
     }
 }
 
+/// The parked pill's dial. A 52-point crown has room for a bezel, a ring and
+/// a glyph and nothing else — so it drops the ticks rather than drawing them
+/// at a size where they become noise.
 private struct MiniDial: View {
     @Bindable var state: DialState
 
     var body: some View {
-        let tint = DialSwatch.volume(state)
+        let tint = DialSwatch.tint(state.control, state: state)
         ZStack {
-            Circle().fill(.black.opacity(0.2))
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: [.white.opacity(0.18), .white.opacity(0.03), .white.opacity(0.14), .white.opacity(0.18)],
+                        center: .center,
+                        angle: .degrees(-60)
+                    )
+                )
+            Circle().fill(.black.opacity(0.82)).padding(2)
+            Circle()
+                .trim(from: 0, to: 0.75)
+                .stroke(.black.opacity(0.5), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                .padding(6)
+                .rotationEffect(.degrees(135))
             Circle()
                 .trim(from: 0, to: 0.75 * (state.usesRingGauge ? state.controlProgress : 0.6))
                 .stroke(tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-                .padding(3)
+                .padding(6)
                 .rotationEffect(.degrees(135))
+                .shadow(color: tint.opacity(0.6), radius: 4)
             Image(systemName: state.control.symbol)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(tint)
+                .contentTransition(.symbolEffect(.replace))
         }
         .frame(width: 52, height: 52)
     }
@@ -853,6 +1015,7 @@ private struct ToolCrown: View {
             ticks: 10,
             size: 252,
             lively: state.desk.allowsDecorativeMotion,
+            metal: .graphite,
             onTurn: { state.turnTool($0) },
             onConfirm: { state.confirmTool() }
         )

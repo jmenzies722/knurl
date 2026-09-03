@@ -1,180 +1,366 @@
 import KnurlCore
 import SwiftUI
 
+// MARK: - Home
+//
+// The live room. Reading order is deliberately the order you care about: what
+// time it is, what the desk is doing, where the dial is, what is playing, and
+// only then how the machine is holding up.
+
 struct HubHome: View {
     @Bindable var state: DialState
-    @Namespace private var room
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.knurlOnScreen) private var onScreen
+
+    private var live: KnurlLiveliness {
+        KnurlLiveliness(reduceMotion: reduceMotion, powerAllows: state.desk.allowsDecorativeMotion)
+    }
 
     var body: some View {
         HubPageScroll {
             atmosphere
+            crown
             roomBoard
-            DeskCrownBank(state: state, hero: state.control, compact: true)
-            feel
+            nowPlaying
+            vitals
         }
-        .animation(motion, value: state.volumePercent)
-        .animation(motion, value: state.brightnessPercent)
-        .animation(motion, value: state.outputUID)
-        .animation(motion, value: state.control)
-        .animation(motion, value: state.desk.timer.running)
-        .animation(motion, value: state.desk.timer.readout)
-        .animation(motion, value: state.music.title)
-        .animation(motion, value: state.voice.isListening)
-        .animation(motion, value: state.tickSound)
-        .animation(motion, value: state.hapticOn)
+        .animation(live.motion(), value: state.volumePercent)
+        .animation(live.motion(), value: state.brightnessPercent)
+        .animation(live.motion(), value: state.outputUID)
+        .animation(live.motion(KnurlMotion.heavy), value: state.control)
+        .animation(live.motion(), value: state.desk.timer.running)
+        .animation(live.motion(), value: state.music.title)
+        .animation(live.motion(), value: state.voice.isListening)
     }
 
-    private var motion: Animation? {
-        HubMotion.spring(reduceMotion: reduceMotion, allowed: state.desk.allowsDecorativeMotion)
-    }
+    // MARK: Header
 
+    @ViewBuilder
     private var atmosphere: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            HubHallHeader(title: time(timeline.date), whisper: whisper) {
-                HStack(spacing: 8) {
+        if onScreen {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                header(at: timeline.date)
+            }
+        } else {
+            header(at: Date())
+        }
+    }
+
+    private func header(at date: Date) -> some View {
+        Group {
+            HubHallHeader(title: clock(date), whisper: whisper) {
+                HStack(spacing: KnurlSpace.tight) {
                     HubGlassButton(
                         title: state.desk.timer.running ? state.desk.timer.readout : "Hour",
                         symbol: "timer",
+                        tint: KnurlPalette.warn,
                         selected: state.desk.timer.running
                     ) {
                         state.hubPage = .tools
                     }
                     HubGlassButton(
-                        title: "Flow",
+                        title: state.voice.isListening ? "Listening" : "Flow",
                         symbol: state.voice.isListening ? "waveform" : "mic.fill",
+                        tint: KnurlPalette.live,
                         selected: state.voice.isListening
                     ) {
                         state.hubPage = .flow
                     }
+                    if state.desk.tools.awake {
+                        HubGlassButton(
+                            title: state.desk.tools.awakeLabel,
+                            symbol: "eye.fill",
+                            tint: KnurlPalette.warn,
+                            selected: true
+                        ) {
+                            state.hubPage = .tools
+                        }
+                    }
                 }
             }
         }
     }
+
+    // MARK: The five faces
 
     private var roomBoard: some View {
-        HubSection(title: "Room") {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(DialMode.allCases) { mode in
-                        HubLiveTile(
-                            title: mode.title,
-                            value: tileValue(mode),
-                            symbol: tileSymbol(mode),
-                            tint: tileTint(mode),
-                            selected: state.control == mode
-                        ) {
-                            if state.control == mode {
-                                state.confirmDial()
-                            } else {
-                                state.selectControl(mode)
-                            }
-                        }
-                        .glassEffectID(mode.rawValue, in: room)
-                        .modifier(HubSelectedGlass(active: state.control == mode, id: "room-tile", namespace: room))
-                    }
+        HubSection(title: "The room", accessory: state.control.title) {
+            HStack(spacing: 1) {
+                ForEach(DialMode.allCases) { mode in
+                    faceCell(mode)
                 }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: KnurlRadius.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: KnurlRadius.card, style: .continuous)
+                    .strokeBorder(KnurlPalette.hairline, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        }
+    }
+
+    private func faceCell(_ mode: DialMode) -> some View {
+        let selected = state.control == mode
+        let tint = tileTint(mode)
+        return VStack(spacing: KnurlSpace.tight) {
+            Image(systemName: tileSymbol(mode))
+                .font(.system(size: 14, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(selected ? tint : KnurlPalette.inkSoft)
+                .contentTransition(.symbolEffect(.replace))
+            Text(tileValue(mode))
+                .font(.knurlNumeral(15))
+                .foregroundStyle(selected ? KnurlPalette.ink : KnurlPalette.inkSoft)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentTransition(reduceMotion ? .opacity : .numericText())
+            Text(mode.title.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle(KnurlPalette.inkFaint)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, KnurlSpace.step)
+        .background(selected ? KnurlPalette.raised : KnurlPalette.card)
+        .overlay(alignment: .bottom) {
+            // The lit edge is the only thing that marks the selected face.
+            // Five tinted cards told you nothing about which one the dial was
+            // actually on.
+            Rectangle()
+                .fill(selected ? tint : .clear)
+                .frame(height: 2)
+        }
+        .overlay(ImmediatePress {
+            if selected { state.confirmDial() } else { state.selectControl(mode) }
+        })
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel("\(mode.title), \(tileValue(mode))")
+    }
+
+    // MARK: The crown
+
+    private var crown: some View {
+        DeskCrownBank(state: state, hero: state.control, compact: true)
+            .padding(.vertical, KnurlSpace.snug)
+    }
+
+    // MARK: Now playing
+
+    @ViewBuilder
+    private var nowPlaying: some View {
+        if state.music.hasTrack {
+            HubSection(title: "Playing", accessory: state.music.genre.isEmpty ? nil : state.music.genre) {
+                VStack(spacing: KnurlSpace.step) {
+                    HStack(alignment: .top, spacing: KnurlSpace.step) {
+                        artwork
+                        VStack(alignment: .leading, spacing: KnurlSpace.hair) {
+                            HStack(spacing: KnurlSpace.snug) {
+                                KnurlEqualizer(
+                                    tint: HubTint.face(.media, progress: 0.6, muted: false),
+                                    bars: 4,
+                                    active: state.music.isPlaying,
+                                    lively: live.lively,
+                                    height: 14
+                                )
+                                Text(state.music.isPlaying ? "Playing" : "Paused")
+                                    .font(.knurlEyebrow)
+                                    .foregroundStyle(KnurlPalette.inkFaint)
+                            }
+                            .padding(.bottom, 2)
+                            Text(state.music.title)
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(KnurlPalette.ink)
+                                .lineLimit(2)
+                            if !state.music.artist.isEmpty {
+                                Text(state.music.artist)
+                                    .font(.knurlBody)
+                                    .foregroundStyle(KnurlPalette.inkSoft)
+                                    .lineLimit(1)
+                            }
+                            if !state.music.album.isEmpty {
+                                Text(state.music.album)
+                                    .font(.knurlEyebrow.weight(.regular))
+                                    .foregroundStyle(KnurlPalette.inkFaint)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: KnurlSpace.snug)
+                            transport
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    playhead
+                }
+                .padding(KnurlSpace.step)
+                .knurlSurface(
+                    .card,
+                    tint: HubTint.face(.media, progress: state.music.displayedPlayhead(), muted: false),
+                    glow: state.music.isPlaying ? 0.3 : 0
+                )
             }
         }
     }
 
-    private var feel: some View {
-        HubSection(title: "Feel") {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(TickSound.allCases) { sound in
-                        HubGlassButton(
-                            title: sound.title,
-                            selected: state.tickSound == sound
-                        ) {
-                            state.setSound(sound)
-                        }
-                    }
-                    HubGlassButton(
-                        title: "Haptic",
-                        symbol: state.hapticOn ? "hand.tap.fill" : "hand.tap",
-                        selected: state.hapticOn
-                    ) {
-                        state.setHaptic(!state.hapticOn)
-                    }
+    private var artwork: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: KnurlRadius.chip, style: .continuous)
+                .fill(KnurlPalette.sunken)
+            if let cover = state.music.cover, state.music.hasTrack {
+                Image(nsImage: cover)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(KnurlPalette.inkFaint)
+            }
+        }
+        .frame(width: 104, height: 104)
+        .clipShape(RoundedRectangle(cornerRadius: KnurlRadius.chip, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: KnurlRadius.chip, style: .continuous)
+                .strokeBorder(KnurlPalette.hairline, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+        .overlay(ImmediatePress { state.revealMusic() })
+        .accessibilityLabel("Open in Music")
+    }
+
+    private var transport: some View {
+        HStack(spacing: KnurlSpace.tight) {
+            transportButton("shuffle", selected: state.music.shuffleOn) { state.toggleShuffle() }
+            transportButton("backward.fill") { state.skip(-1) }
+            Image(systemName: state.music.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 32)
+                .background {
+                    Capsule().fill(HubTint.face(.media, progress: 0.6, muted: false))
                 }
+                .shadow(color: HubTint.face(.media, progress: 0.6, muted: false).opacity(0.5), radius: 10, y: 2)
+                .overlay(ImmediatePress { state.collapsedPlay() })
+                .accessibilityLabel(state.music.isPlaying ? "Pause" : "Play")
+            transportButton("forward.fill") { state.skip(1) }
+            transportButton(state.music.repeatMode.symbol, selected: state.music.repeatMode != .off) {
+                state.cycleRepeat()
             }
         }
     }
+
+    private func transportButton(
+        _ symbol: String,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(selected ? HubTint.face(.media, progress: 0.6, muted: false) : KnurlPalette.inkSoft)
+            .frame(width: 32, height: 32)
+            .background {
+                Circle().fill(KnurlPalette.control)
+            }
+            .overlay {
+                Circle().strokeBorder(KnurlPalette.hairline, lineWidth: 1)
+            }
+            .overlay(ImmediatePress(action: action))
+            .accessibilityLabel(symbol)
+    }
+
+    @ViewBuilder
+    private var playhead: some View {
+        // Only worth a quarter-second timeline while it is both visible and
+        // actually moving.
+        if onScreen, state.music.isPlaying {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                playheadBody(at: timeline.date)
+            }
+        } else {
+            playheadBody(at: Date())
+        }
+    }
+
+    private func playheadBody(at now: Date) -> some View {
+        Group {
+            let progress = state.music.canSeek ? state.music.displayedPlayhead(at: now) : 0
+            let elapsed = progress * state.music.duration
+            VStack(spacing: KnurlSpace.tight) {
+                KnurlMeter(
+                    progress: progress,
+                    tint: HubTint.face(.media, progress: progress, muted: false),
+                    height: 5
+                )
+                HStack {
+                    Text(state.music.canSeek ? DialMath.clock(elapsed) : "—")
+                    Spacer()
+                    Text(state.music.canSeek ? "−\(DialMath.clock(max(0, state.music.duration - elapsed)))" : "—")
+                }
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundStyle(KnurlPalette.inkFaint)
+            }
+        }
+    }
+
+    // MARK: Vitals
+
+    private var vitals: some View {
+        HubSection(title: "This Mac", accessory: nil) {
+            HubVitalsRow(state: state)
+        }
+    }
+
+    // MARK: Facts
 
     private var whisper: String {
-        if state.desk.timer.running {
-            return "Hour · \(state.desk.timer.readout)"
-        }
-        if state.voice.isListening {
-            return "Flow → \(state.harnessName)"
-        }
-        if state.music.hasTrack {
-            return state.music.title
-        }
-        return "\(state.control.title) · enjoy the Mac."
+        if state.voice.isListening { return "Listening. Words land in \(state.harnessName)." }
+        if state.desk.timer.running { return "The hour is running. \(state.desk.timer.readout) left." }
+        if state.music.hasTrack, state.music.isPlaying { return "\(state.music.line) · \(state.outputName)" }
+        return "\(Date().formatted(.dateTime.weekday(.wide).month().day())) · \(state.outputName)"
     }
 
-    private func time(_ date: Date) -> String {
+    private func clock(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)
     }
 
     private func tileValue(_ mode: DialMode) -> String {
         switch mode {
-        case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
-        case .brightness: "\(state.brightnessPercent)"
-        case .mic: state.isMicMuted ? "Muted" : "\(state.micPercent)"
+        case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)%"
+        case .brightness: "\(state.brightnessPercent)%"
+        case .mic: state.isMicMuted ? "Muted" : "\(state.micPercent)%"
         case .output: shortName(state.outputName)
-        case .media: state.music.hasTrack ? shortName(state.music.title) : "—"
+        case .media: state.music.hasTrack ? shortName(state.music.title) : "Nothing"
         }
     }
 
     private func tileSymbol(_ mode: DialMode) -> String {
         switch mode {
         case .volume: state.isMuted ? "speaker.slash.fill" : mode.symbol
-        case .mic: state.isMicMuted ? "mic.slash.fill" : mode.symbol
+        case .mic: state.voice.isListening ? "waveform" : (state.isMicMuted ? "mic.slash.fill" : mode.symbol)
         case .media: state.music.isPlaying ? "pause.fill" : mode.symbol
         case .output:
-            state.outputDevices.first { $0.uid == state.outputUID }?.transport.symbol
-                ?? mode.symbol
-        case .brightness:
-            mode.symbol
+            state.outputDevices.first { $0.uid == state.outputUID }?.transport.symbol ?? mode.symbol
+        case .brightness: mode.symbol
         }
     }
 
-    private func tileTint(_ mode: DialMode) -> Color {
-        let progress: Double = switch mode {
+    private func tileProgress(_ mode: DialMode) -> Double {
+        switch mode {
         case .volume: state.volumeProgress
         case .brightness: Double(state.brightnessPercent) / 100
         case .mic: Double(state.micPercent) / 100
         case .output: state.outputProgress
         case .media: state.music.displayedPlayhead()
         }
-        return HubTint.face(
+    }
+
+    private func tileTint(_ mode: DialMode) -> Color {
+        HubTint.face(
             mode,
-            progress: progress,
+            progress: tileProgress(mode),
             muted: (mode == .volume && state.isMuted) || (mode == .mic && state.isMicMuted)
         )
     }
 
     private func shortName(_ name: String) -> String {
         name.count > 12 ? String(name.prefix(11)) + "…" : name
-    }
-}
-
-struct HubPageScroll<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                content()
-            }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 920, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .backgroundExtensionEffect()
     }
 }

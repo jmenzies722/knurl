@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import KnurlCore
 import SwiftUI
 
 final class HubPanel: NSWindow {
@@ -39,10 +40,8 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
     static let shared = HubWindow()
 
     private var window: HubPanel?
-    private var musicHost: NSHostingView<HubToolbarMusic>?
     private var escapeMonitor: Any?
     private let musicID = NSToolbarItem.Identifier("knurl.music")
-    private let settingsID = NSToolbarItem.Identifier("knurl.settings")
 
     private override init() {
         super.init()
@@ -56,10 +55,18 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         guard escapeMonitor == nil else { return }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard Int(event.keyCode) == kVK_Escape else { return event }
-            guard let self, let window = self.window else { return event }
-            guard event.window === window || NSApp.keyWindow === window else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard mods.isEmpty else { return event }
+            if AppDelegate.shared?.state.voice.isActive == true {
+                AppDelegate.shared?.state.cancelTalk()
+                return nil
+            }
+            if AppDelegate.shared?.state.wantsSettings == true {
+                AppDelegate.shared?.state.dismissSettings()
+                return nil
+            }
+            guard let self, let window = self.window else { return event }
+            guard event.window === window || NSApp.keyWindow === window else { return event }
             AppDelegate.shared?.state.hideHub()
             return nil
         }
@@ -67,15 +74,8 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     func attach(_ state: DialState, agents: AgentSessionManager) {
         installEscapeMonitor()
-        let host = NSHostingView(rootView: HubToolbarMusic(state: state))
-        host.setFrameSize(NSSize(width: 208, height: 30))
-        host.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        musicHost = host
         let window = ensure()
         window.contentView = HubHostingView(rootView: HubView(state: state, agents: agents))
-        if let item = window.toolbar?.items.first(where: { $0.itemIdentifier == musicID }) {
-            item.view = host
-        }
     }
 
     func show() {
@@ -84,11 +84,17 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         restoreFrame(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        AppDelegate.shared?.state.hubVisible = true
     }
 
     func hide() {
         persistFrame()
         window?.orderOut(nil)
+        AppDelegate.shared?.state.hubVisible = false
+    }
+
+    func resignKey() {
+        window?.resignKey()
     }
 
     func windowDidMove(_ notification: Notification) {
@@ -101,15 +107,16 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     func windowWillClose(_ notification: Notification) {
         persistFrame()
+        AppDelegate.shared?.state.hubVisible = false
         AppDelegate.shared?.state.noteHubClosed()
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, musicID, settingsID]
+        [.flexibleSpace, musicID]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, musicID, settingsID]
+        [.flexibleSpace, musicID]
     }
 
     func toolbar(
@@ -122,21 +129,9 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Open Music"
             item.paletteLabel = "Open Music"
-            if let musicHost {
-                item.view = musicHost
-            } else {
-                item.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Open Music")
-                item.target = self
-                item.action = #selector(openMusic)
-            }
-            return item
-        case settingsID:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Settings"
-            item.paletteLabel = "Settings"
-            item.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+            item.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Open Music")
             item.target = self
-            item.action = #selector(openSettings)
+            item.action = #selector(openMusic)
             return item
         default:
             return nil
@@ -147,39 +142,35 @@ final class HubWindow: NSObject, NSWindowDelegate, NSToolbarDelegate {
         AppDelegate.shared?.state.revealMusic()
     }
 
-    @objc private func openSettings() {
-        AppDelegate.shared?.openSettings()
-    }
-
     private func ensure() -> HubPanel {
         if let window { return window }
         let created = HubPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 840),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         created.title = "Knurl"
-        created.minSize = NSSize(width: 980, height: 700)
+        created.minSize = NSSize(width: 1040, height: 720)
         created.isReleasedWhenClosed = false
         created.titlebarAppearsTransparent = true
         created.titleVisibility = .hidden
         created.titlebarSeparatorStyle = .none
-        created.backgroundColor = NSColor.windowBackgroundColor
+        // The Hub paints its own field edge to edge, so the window must not
+        // paint one first — a stock window background shows as a pale band
+        // behind the rail for the first frame of every resize.
+        created.backgroundColor = NSColor(name: nil) { appearance in
+            appearance.isDarkDesk ? KnurlPalette.hex(0x18181B) : KnurlPalette.hex(0xF2F3F6)
+        }
+        created.isOpaque = true
         created.delegate = self
-        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("KnurlHub"))
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        created.toolbar = toolbar
-        created.toolbarStyle = .unified
         restoreFrame(created)
         window = created
         return created
     }
 
     private func restoreFrame(_ window: HubPanel) {
-        guard let frame = Preferences.hubFrame, frame.width >= 960, frame.height >= 680 else {
+        guard let frame = Preferences.hubFrame, frame.width >= 1040, frame.height >= 720 else {
             if window.frame.origin == .zero {
                 window.center()
             }

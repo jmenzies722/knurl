@@ -1,82 +1,358 @@
 import KnurlCore
 import SwiftUI
 
+// MARK: - Settings
+//
+// A sheet on the Hub, not a separate preferences window, and drawn in the
+// same language as the rest of the desk. Grouped into what you feel, what the
+// desk is allowed to touch, and what Knurl promises never to touch.
+
 struct SettingsView: View {
     @Bindable var state: DialState
+    @Environment(\.dismiss) private var dismiss
+
+    private var tools: DeskToolbox { state.desk.tools }
 
     var body: some View {
-        Form {
-            Section("General") {
-                Picker("Tick sound", selection: Binding(
-                    get: { state.tickSound },
-                    set: { state.setSound($0) }
-                )) {
-                    ForEach(TickSound.allCases) { sound in
-                        Text(sound.title).tag(sound)
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: KnurlSpace.room) {
+                    feel
+                    flow
+                    weather
+                    desk
+                    windowManager
+                    shelf
+                    keys
+                    privacy
+                }
+                .padding(KnurlSpace.room)
+            }
+            .scrollIndicators(.never)
+            footer
+        }
+        .frame(width: 560, height: 640)
+        .background {
+            ZStack {
+                KnurlPalette.void
+                KnurlAtmosphere(
+                    tint: HubTint.face(state.control, progress: state.controlProgress, muted: false),
+                    energy: 0.2,
+                    lively: false
+                )
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Settings")
+                    .font(.knurlHall)
+                    .foregroundStyle(KnurlPalette.ink)
+                Text("Knurl runs the room. You decide how much of it.")
+                    .font(.knurlBody)
+                    .foregroundStyle(KnurlPalette.inkSoft)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, KnurlSpace.room)
+        .padding(.top, KnurlSpace.room)
+        .padding(.bottom, KnurlSpace.snug)
+    }
+
+    // MARK: Feel
+
+    private var feel: some View {
+        card(title: "Feel") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                labelled("Tick sound") {
+                    FlowLayout {
+                        ForEach(TickSound.allCases) { sound in
+                            HubGlassButton(
+                                title: sound.title,
+                                tint: HubTint.face(state.control, progress: 0.6, muted: false),
+                                selected: state.tickSound == sound
+                            ) {
+                                state.setSound(sound)
+                            }
+                        }
                     }
                 }
-                Toggle("Haptic tick", isOn: Binding(
-                    get: { state.hapticOn },
-                    set: { state.setHaptic($0) }
-                ))
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { state.launchesAtLogin },
-                    set: { state.setLaunchesAtLogin($0) }
-                ))
+                toggle(
+                    "Haptic tick",
+                    detail: "A detent you can feel on a Force Touch trackpad.",
+                    isOn: state.hapticOn
+                ) { state.setHaptic($0) }
+                toggle(
+                    "Launch at login",
+                    detail: "The desk is parked at cold start — nothing pops on the screen.",
+                    isOn: state.launchesAtLogin
+                ) { state.setLaunchesAtLogin($0) }
                 if let login = state.loginItemError {
-                    Text(login).foregroundStyle(.secondary)
+                    note(login, tint: KnurlPalette.warn)
                 }
                 if let error = state.hotkeyError {
-                    Text(error).foregroundStyle(.red)
+                    note(error, tint: KnurlPalette.alert)
                 }
             }
-            Section("Desk") {
-                Text("1–5 switch faces. Turn for level. Click to confirm. \(HotkeyCenter.shared.chord) is the dial. Closing the Hub does not quit.")
-                    .foregroundStyle(.secondary)
-                Text("The menu bar is a live island — music, Hour, and Flow. Click it for the shelf. Right-click for Hub and Quit.")
-                    .foregroundStyle(.secondary)
-                Picker("Power", selection: Binding(
-                    get: { state.desk.powerMode },
-                    set: { state.desk.powerMode = $0 }
-                )) {
-                    ForEach(PowerMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+        }
+    }
+
+    // MARK: Flow
+
+    private var flow: some View {
+        card(title: "Flow") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                HubFact(
+                    label: "Hold",
+                    value: HotkeyCenter.shared.talkChord,
+                    secondary: "Speak, release, and the words land where you were"
+                )
+                if Voice.canPaste {
+                    note("Knurl can paste for you. Speech never leaves this Mac.", tint: KnurlPalette.live)
+                } else {
+                    note(
+                        "Knurl can hear you but cannot type for you: landing dictation in another app is a synthetic ⌘V, and macOS only delivers that to a trusted process. Until then your words are copied and you press ⌘V yourself. macOS quits and reopens Knurl when you grant it — that is expected.",
+                        tint: KnurlPalette.warn
+                    )
+                    HStack(spacing: KnurlSpace.tight) {
+                        HubGlassButton(
+                            title: "Allow Knurl",
+                            symbol: "checkmark.shield",
+                            tint: KnurlPalette.warn,
+                            selected: true
+                        ) {
+                            Voice.requestPastePermission()
+                        }
+                        HubGlassButton(title: "Open Settings", symbol: "gearshape") {
+                            Voice.openAccessibilitySettings()
+                        }
                     }
                 }
             }
-            Section("Window Manager") {
-                Toggle("Enable Window Manager", isOn: Binding(
-                    get: { state.desk.windows.enabled },
-                    set: { state.desk.windows.setEnabled($0) }
-                ))
-                Text("Uses Accessibility to move windows you ask to move. Off by default. Never requires Screen Recording.")
-                    .foregroundStyle(.secondary)
-                if let status = state.desk.windows.status {
-                    Text(status).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Weather
+
+    private var weather: some View {
+        card(title: "Weather") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                toggle(
+                    "Show local weather",
+                    detail: "The only part of Knurl that uses the network or your location. Your coordinate is rounded to about a kilometre and sent to Open-Meteo — no account, no key, nothing else, once every half hour.",
+                    isOn: state.desk.weather.enabled
+                ) { state.desk.weather.enabled = $0 }
+                if let message = state.desk.weather.message {
+                    note(message, tint: KnurlPalette.warn)
                 }
             }
-            Section("Flow") {
-                Text("Hold \(HotkeyCenter.shared.talkChord). Speech stays on this Mac. Words land in \(state.harnessName).")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Tools") {
-                Text("Hour lives on Tools. Turn the crown for minutes, click to start. The notch keeps the remaining time. Dim the room drops brightness and remembers where you were.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("Privacy") {
-                Text("Knurl does not record your screen, monitor your keyboard, or send your source code to a cloud AI service. Accessibility is used only after you enable Window Manager.")
-                    .foregroundStyle(.secondary)
-            }
-            Section("About") {
-                Text("Knurl runs the room — music, volume, brightness, speakers, mic, Flow, windows, Hour.")
-                    .foregroundStyle(.secondary)
-                Text(CrownServer.shared.ready
-                     ? "iPhone crown is on the local network."
-                     : "iPhone crown is still starting.")
-                    .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Desk
+
+    private var desk: some View {
+        card(title: "Desk") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                labelled("Power") {
+                    FlowLayout {
+                        ForEach(PowerMode.allCases) { mode in
+                            HubGlassButton(
+                                title: mode.title,
+                                tint: KnurlPalette.warn,
+                                selected: state.desk.powerMode == mode
+                            ) {
+                                state.desk.powerMode = mode
+                            }
+                            .help(mode.summary)
+                        }
+                    }
+                }
+                note("Battery mode parks decorative motion. The room stops breathing and the Mac lasts longer.")
+                toggle(
+                    "Keep this Mac awake",
+                    detail: "Holds a power assertion so the display never idles. Released the moment you turn it off or quit.",
+                    isOn: tools.awake
+                ) { tools.setAwake($0) }
             }
         }
-        .formStyle(.grouped)
-        .frame(minWidth: 460, minHeight: 520)
+    }
+
+    // MARK: Window Manager
+
+    private var windowManager: some View {
+        card(title: "Window Manager") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                toggle(
+                    "Let Knurl move windows",
+                    detail: "Asks for Accessibility the moment you turn it on. Flow's paste uses the same permission — granting it once covers both.",
+                    isOn: state.desk.windows.enabled
+                ) { state.desk.windows.setEnabled($0) }
+                if let status = state.desk.windows.status {
+                    note(status, tint: KnurlPalette.warn)
+                }
+                note("Public move and resize only. Never Screen Recording, never keystroke tiling.")
+            }
+        }
+    }
+
+    // MARK: Shelf
+
+    private var shelf: some View {
+        card(title: "Clipboard shelf") {
+            VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                toggle(
+                    "Keep the last twelve copies",
+                    detail: "Held in memory only, never written to disk, gone when Knurl quits.",
+                    isOn: tools.shelfEnabled
+                ) { tools.shelfEnabled = $0 }
+                if tools.shelfEnabled, !tools.shelf.isEmpty {
+                    HubGlassButton(title: "Clear the shelf now", symbol: "trash") {
+                        tools.clearShelf()
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Keys
+
+    private var keys: some View {
+        card(title: "Keys") {
+            VStack(spacing: 0) {
+                HubFact(label: "Dial", value: HotkeyCenter.shared.chord, secondary: "Summon the last face")
+                HubFact(label: "Flow", value: HotkeyCenter.shared.talkChord, secondary: "Hold to talk, release to paste")
+                HubFact(label: "Volume", value: "⌃⌥↑ / ⌃⌥↓", secondary: "From anywhere")
+                HubFact(label: "Faces", value: "1 – 5", secondary: "Media, Volume, Bright, Output, Mic")
+                HubFact(label: "Hub pages", value: "⌘1 – ⌘6", secondary: "In rail order")
+                HubFact(label: "Settings", value: "⌘,")
+            }
+        }
+    }
+
+    // MARK: Privacy
+
+    private var privacy: some View {
+        card(title: "What Knurl never does") {
+            VStack(alignment: .leading, spacing: KnurlSpace.snug) {
+                ForEach(promises, id: \.self) { promise in
+                    HStack(alignment: .top, spacing: KnurlSpace.snug) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundStyle(KnurlPalette.alert)
+                            .frame(width: 14, height: 14)
+                            .background { Circle().fill(KnurlPalette.alert.opacity(0.16)) }
+                        Text(promise)
+                            .font(.knurlBody)
+                            .foregroundStyle(KnurlPalette.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                note(
+                    CrownServer.shared.ready
+                        ? "The iPhone crown is on the local network."
+                        : "The iPhone crown is still starting."
+                )
+            }
+        }
+    }
+
+    private var promises: [String] {
+        [
+            "Record your screen or take screenshots.",
+            "Monitor or store keystrokes. It posts exactly one synthetic ⌘V, to land a Flow dictation, and reads none.",
+            "Send your speech, your clipboard, or your source to any cloud service.",
+            "Keep the microphone open when you are not holding Flow.",
+        ]
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack {
+            Text("Knurl · macOS 26 · Apple Silicon")
+                .font(.knurlEyebrow.weight(.regular))
+                .foregroundStyle(KnurlPalette.inkFaint)
+            Spacer()
+            HubGlassButton(
+                title: "Done",
+                tint: HubTint.face(state.control, progress: 0.6, muted: false),
+                selected: true
+            ) {
+                state.dismissSettings()
+                dismiss()
+            }
+        }
+        .padding(KnurlSpace.room)
+        .background {
+            Rectangle()
+                .fill(KnurlPalette.stage.opacity(0.9))
+                .overlay(alignment: .top) {
+                    Rectangle().fill(KnurlPalette.hairline).frame(height: 1)
+                }
+        }
+    }
+
+    // MARK: Parts
+
+    private func card<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            KnurlEyebrow(text: title)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(KnurlSpace.step)
+        .knurlSurface()
+    }
+
+    private func labelled<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.tight) {
+            Text(title)
+                .font(.knurlBody.weight(.medium))
+                .foregroundStyle(KnurlPalette.ink)
+            content()
+        }
+    }
+
+    private func toggle(
+        _ title: String,
+        detail: String,
+        isOn: Bool,
+        set: @escaping (Bool) -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: KnurlSpace.step) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.knurlBody.weight(.medium))
+                    .foregroundStyle(KnurlPalette.ink)
+                Text(detail)
+                    .font(.knurlEyebrow.weight(.regular))
+                    .foregroundStyle(KnurlPalette.inkFaint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: KnurlSpace.snug)
+            Toggle("", isOn: Binding(get: { isOn }, set: set))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(title)
+        }
+    }
+
+    private func note(_ text: String, tint: Color = KnurlPalette.inkFaint) -> some View {
+        Text(text)
+            .font(.knurlEyebrow.weight(.regular))
+            .foregroundStyle(tint)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

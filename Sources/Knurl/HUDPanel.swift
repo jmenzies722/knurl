@@ -88,7 +88,7 @@ final class HUDPanel {
     private var suppressMove = false
     private let pillSize = NSSize(width: 172, height: 52)
     private let pillHoveredSize = NSSize(width: 288, height: 52)
-    private let pillListeningSize = NSSize(width: 330, height: 56)
+    private let pillListeningSize = NSSize(width: 400, height: 56)
     private let pillPagesSize = NSSize(width: 300, height: 52)
     /// Gap between the pill and the top of the Dock.
     private let dockGap: CGFloat = 10
@@ -103,6 +103,7 @@ final class HUDPanel {
     }
 
     func parkCollapsed() {
+        AppDelegate.shared?.state.hudVisible = true
         let panel = ensurePanel()
         dock(panel, expanded: false)
         panel.orderFront(nil)
@@ -111,6 +112,7 @@ final class HUDPanel {
     }
 
     func show() {
+        AppDelegate.shared?.state.hudVisible = true
         AppDelegate.shared?.noteHUDActivation()
         let panel = ensurePanel()
         dock(panel, expanded: true)
@@ -130,6 +132,7 @@ final class HUDPanel {
     }
 
     func hide() {
+        AppDelegate.shared?.state.hudVisible = false
         removeMonitors()
         rememberDock()
         panel?.orderOut(nil)
@@ -309,7 +312,7 @@ final class HUDPanel {
 
     private func dockedFrame(expanded: Bool, screen: NSRect? = nil) -> NSRect {
         let visible = screen ?? dockScreen()
-        let listening = AppDelegate.shared?.state.voice.isListening == true
+        let listening = AppDelegate.shared?.state.voice.isActive == true
         let pages = AppDelegate.shared?.state.pillShowsPages == true
         let parkedSize: NSSize = if listening {
             pillListeningSize
@@ -331,6 +334,19 @@ final class HUDPanel {
         let inset: CGFloat = expanded ? 16 : 8
         let x = min(max(visible.minX + inset, midX - size.width / 2), visible.maxX - size.width - inset)
         let height = min(size.height, visible.height - dockGap - 16)
+
+        // On a notched Mac the dial belongs under the notch. That is where
+        // Knurl parks and where you just clicked or pressed ⌃⌥K from, so the
+        // panel appearing anywhere else reads as a different app opening.
+        // A dial you have dragged somewhere keeps your position.
+        if expanded,
+           UserDefaults.standard.string(forKey: Self.dialOriginKey) == nil,
+           let housing = AppDelegate.shared?.state.notchHousing,
+           housing.width > 1 {
+            let x = min(max(visible.minX + inset, housing.midX - size.width / 2),
+                        visible.maxX - size.width - inset)
+            return NSRect(x: x, y: visible.maxY - height - 12, width: size.width, height: height)
+        }
 
         // A dial the user has moved keeps its own position; only its first
         // appearance grows out of the pill.

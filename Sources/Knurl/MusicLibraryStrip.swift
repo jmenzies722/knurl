@@ -1,3 +1,4 @@
+import KnurlCore
 import SwiftUI
 
 struct MusicLibraryStrip: View {
@@ -7,8 +8,8 @@ struct MusicLibraryStrip: View {
     var body: some View {
         if state.music.sources.isEmpty {
             Text("Open Music to load genres and playlists.")
-                .font(compact ? .system(size: 11) : .caption)
-                .foregroundStyle(.secondary)
+                .font(compact ? .system(size: 11) : .knurlEyebrow.weight(.regular))
+                .foregroundStyle(KnurlPalette.inkFaint)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: compact ? 6 : 8) {
@@ -50,15 +51,21 @@ struct MusicLibraryStrip: View {
                     .font(compact ? .system(size: 11, weight: .medium) : .caption.weight(.medium))
                     .lineLimit(1)
             }
-            .padding(.horizontal, compact ? 10 : 12)
+            .padding(.horizontal, compact ? 11 : 13)
             .padding(.vertical, compact ? 7 : 8)
-            .foregroundStyle(.primary.opacity(0.92))
-            .glassEffect(
-                selected
-                    ? .regular.tint(DialSwatch.stable(.media).opacity(0.42)).interactive()
-                    : .regular.interactive(),
-                in: Capsule()
-            )
+            .foregroundStyle(selected ? .white : KnurlPalette.inkSoft)
+            .background {
+                Capsule().fill(
+                    selected ? DialSwatch.stable(.media) : KnurlPalette.control
+                )
+            }
+            .overlay {
+                Capsule().strokeBorder(
+                    selected ? DialSwatch.stable(.media) : KnurlPalette.hairline,
+                    lineWidth: 1
+                )
+            }
+            .shadow(color: selected ? DialSwatch.stable(.media).opacity(0.35) : .clear, radius: 9, y: 2)
         }
         .buttonStyle(.plain)
         .focusable(false)
