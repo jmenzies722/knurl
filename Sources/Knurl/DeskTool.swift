@@ -9,18 +9,21 @@ import SwiftUI
 /// and touches none of that.
 enum DeskTool: String, CaseIterable, Identifiable, Sendable {
     case hour
+    case power
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .hour: "Hour"
+        case .power: "Power"
         }
     }
 
     var symbol: String {
         switch self {
         case .hour: "timer"
+        case .power: "bolt.fill"
         }
     }
 
@@ -28,6 +31,7 @@ enum DeskTool: String, CaseIterable, Identifiable, Sendable {
     var tint: Color {
         switch self {
         case .hour: DialSwatch.bright
+        case .power: DialSwatch.output
         }
     }
 }
