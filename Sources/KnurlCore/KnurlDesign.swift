@@ -34,7 +34,7 @@ public enum KnurlPalette {
     /// white card is a chip you cannot see.
     public static let control = dynamic(dark: hex(0x35353B), light: hex(0xEFEFF4))
     /// The dial's unfilled ring and the disc under its readout.
-    public static let dialTrack = dynamicAlpha(dark: (0xFFFFFF, 0.10), light: (0x1D1D1F, 0.08))
+    public static let dialTrack = dynamicAlpha(dark: (0xFFFFFF, 0.16), light: (0x1D1D1F, 0.10))
     public static let dialWell = dynamicAlpha(dark: (0xFFFFFF, 0.04), light: (0x1D1D1F, 0.03))
 
     public static let hairline = dynamicAlpha(dark: (0xFFFFFF, 0.10), light: (0x1D1D1F, 0.10))
@@ -587,9 +587,11 @@ public enum KnurlMetal: Sendable {
 
     /// The unfilled part of the ring. Soft and low-contrast: it is a guide,
     /// not a frame.
+    /// Visible enough to read as a channel at any value. A dial sitting at 6%
+    /// still has to look like a dial, and 10% white on near-black does not.
     public var track: Color {
         self == .graphite
-            ? Color.white.opacity(0.10)
+            ? Color.white.opacity(0.16)
             : KnurlPalette.dialTrack
     }
 

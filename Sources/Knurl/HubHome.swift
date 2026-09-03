@@ -20,7 +20,6 @@ struct HubHome: View {
         HubPageScroll {
             atmosphere
             crown
-            roomBoard
             nowPlaying
             vitals
         }
@@ -82,61 +81,6 @@ struct HubHome: View {
     }
 
     // MARK: The five faces
-
-    private var roomBoard: some View {
-        HubSection(title: "The room", accessory: state.control.title) {
-            HStack(spacing: 1) {
-                ForEach(DialMode.allCases) { mode in
-                    faceCell(mode)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: KnurlRadius.card, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: KnurlRadius.card, style: .continuous)
-                    .strokeBorder(KnurlPalette.hairline, lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-        }
-    }
-
-    private func faceCell(_ mode: DialMode) -> some View {
-        let selected = state.control == mode
-        let tint = tileTint(mode)
-        return VStack(spacing: KnurlSpace.tight) {
-            Image(systemName: tileSymbol(mode))
-                .font(.system(size: 14, weight: .medium))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(selected ? tint : KnurlPalette.inkSoft)
-                .contentTransition(.symbolEffect(.replace))
-            Text(tileValue(mode))
-                .font(.knurlNumeral(15))
-                .foregroundStyle(selected ? KnurlPalette.ink : KnurlPalette.inkSoft)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentTransition(reduceMotion ? .opacity : .numericText())
-            Text(mode.title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(0.7)
-                .foregroundStyle(KnurlPalette.inkFaint)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, KnurlSpace.step)
-        .background(selected ? KnurlPalette.raised : KnurlPalette.card)
-        .overlay(alignment: .bottom) {
-            // The lit edge is the only thing that marks the selected face.
-            // Five tinted cards told you nothing about which one the dial was
-            // actually on.
-            Rectangle()
-                .fill(selected ? tint : .clear)
-                .frame(height: 2)
-        }
-        .overlay(ImmediatePress {
-            if selected { state.confirmDial() } else { state.selectControl(mode) }
-        })
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityLabel("\(mode.title), \(tileValue(mode))")
-    }
 
     // MARK: The crown
 
@@ -319,45 +263,6 @@ struct HubHome: View {
 
     private func clock(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)
-    }
-
-    private func tileValue(_ mode: DialMode) -> String {
-        switch mode {
-        case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)%"
-        case .brightness: "\(state.brightnessPercent)%"
-        case .mic: state.isMicMuted ? "Muted" : "\(state.micPercent)%"
-        case .output: shortName(state.outputName)
-        case .media: state.music.hasTrack ? shortName(state.music.title) : "Nothing"
-        }
-    }
-
-    private func tileSymbol(_ mode: DialMode) -> String {
-        switch mode {
-        case .volume: state.isMuted ? "speaker.slash.fill" : mode.symbol
-        case .mic: state.voice.isListening ? "waveform" : (state.isMicMuted ? "mic.slash.fill" : mode.symbol)
-        case .media: state.music.isPlaying ? "pause.fill" : mode.symbol
-        case .output:
-            state.outputDevices.first { $0.uid == state.outputUID }?.transport.symbol ?? mode.symbol
-        case .brightness: mode.symbol
-        }
-    }
-
-    private func tileProgress(_ mode: DialMode) -> Double {
-        switch mode {
-        case .volume: state.volumeProgress
-        case .brightness: Double(state.brightnessPercent) / 100
-        case .mic: Double(state.micPercent) / 100
-        case .output: state.outputProgress
-        case .media: state.music.displayedPlayhead()
-        }
-    }
-
-    private func tileTint(_ mode: DialMode) -> Color {
-        HubTint.face(
-            mode,
-            progress: tileProgress(mode),
-            muted: (mode == .volume && state.isMuted) || (mode == .mic && state.isMicMuted)
-        )
     }
 
     private func shortName(_ name: String) -> String {

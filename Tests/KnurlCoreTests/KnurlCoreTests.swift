@@ -586,20 +586,27 @@ struct NotchStageTests {
         #expect(NotchStage.rest.height == 0)
     }
 
-    @Test func closedStagesGrowAndOpenStagesClearTheClosedOnes() {
-        // Growth is only monotonic up to `hover`. Past that the stages are
-        // siblings sized to their own content, not steps on a ladder: the
-        // shelf is the tallest because it carries the dial, the faces and the
-        // exits — it is the notch's answer to a menu bar item. Asserting a
-        // total order here would be asserting a design nobody chose.
-        let closed: [NotchStage] = [.rest, .glance, .hover]
-        for (a, b) in zip(closed, closed.dropFirst()) {
-            #expect(a.height < b.height, "\(a) should be shorter than \(b)")
+    @Test func theCompactStageWidensAndTheOpenStagesDrop() {
+        // Two different motions, and the difference is the design.
+        //
+        // `glance` is Apple's compact Dynamic Island: it *widens* to put a
+        // glyph and an indicator either side of the cutout, and drops nothing
+        // below the housing. `hover` and beyond drop. Asserting a single
+        // ladder of heights would assert a design nobody chose — and did,
+        // until the compact stage stopped hanging a bar under the notch.
+        #expect(NotchStage.rest.height == 0)
+        #expect(NotchStage.rest.flare == 0)
+
+        #expect(NotchStage.glance.height == 0, "compact must not drop below the housing")
+        #expect(NotchStage.glance.flare > 0, "compact is the stage that widens")
+
+        for open in [NotchStage.hover, .shelf, .flow] {
+            #expect(open.height > 0, "\(open) must drop below the housing")
+            #expect(open.flare > NotchStage.glance.flare, "\(open) must be wider than compact")
         }
-        for open in [NotchStage.shelf, .flow] {
-            #expect(open.height > NotchStage.hover.height)
-            #expect(open.flare >= NotchStage.hover.flare - 1)
-        }
+        // The shelf carries the most: the dial, the scrubbers, the faces and
+        // the exits.
+        #expect(NotchStage.shelf.height > NotchStage.hover.height)
         #expect(NotchStage.rest.flare < NotchStage.hover.flare)
         #expect(NotchStage.rest.topCornerRadius < NotchStage.hover.topCornerRadius)
         // Only the stages that show controls count as open.

@@ -12,8 +12,10 @@ public enum NotchStage: String, Sendable, CaseIterable {
     /// under the housing is not "in the notch", it is a bar below the notch
     /// wearing the notch's colour.
     case rest
-    /// Something is genuinely happening — an hour running, a track playing,
-    /// Flow listening. A single lit hairline, barely proud of the bezel.
+    /// Something is genuinely happening. Content sits *beside* the cutout in
+    /// the menu bar strip — a leading glyph and a trailing indicator — which
+    /// is how Apple's Dynamic Island presents compactly. Hanging a bar below
+    /// the notch was the wrong model: the island widens, it does not drip.
     case glance
     /// The pointer is on the housing: the dial and the controls drop out.
     case hover
@@ -25,12 +27,14 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var height: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 5
+        // Nothing below the housing: the compact stage lives in the housing
+        // row itself, flanking the cutout.
+        case .glance: 0
         case .hover: 60
         // The shelf carries the whole desk: what is playing, a dial you can
         // actually turn, the five faces, and the way out. It is the notch's
         // answer to a menu bar item, so it has to hold what one holds.
-        case .shelf: 184
+        case .shelf: 178
         case .flow: 132
         }
     }
@@ -44,7 +48,10 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var flare: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 4
+        // Deliberately small. This sits over the menu bar, and unlike an
+        // iPhone a Mac has menu titles under there — every point of width is
+        // a point of somebody's File menu covered up.
+        case .glance: 46
         case .hover: 96
         // Wider than hover: the shelf carries cover art, a title, three
         // transport keys and two more besides. Sized to its content rather
@@ -66,7 +73,7 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var bottomCornerRadius: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 3
+        case .glance: 11
         case .hover: 16
         case .shelf, .flow: 20
         }

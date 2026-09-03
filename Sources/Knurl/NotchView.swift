@@ -30,7 +30,7 @@ struct NotchView: View {
             lively: lively
         ) {
             VStack(spacing: 0) {
-                Color.clear
+                housingBand
                     .frame(height: max(state.notchHousing.height, 1))
                 content
                     .frame(height: stage.height)
@@ -50,40 +50,101 @@ struct NotchView: View {
         lively ? .spring(duration: 0.26, bounce: 0.05) : .easeOut(duration: 0.12)
     }
 
+    /// The row level with the cutout. On the compact stage this is where the
+    /// content lives — leading and trailing, flanking the camera — because
+    /// there are no pixels behind the cutout itself to draw on.
+    @ViewBuilder
+    private var housingBand: some View {
+        if stage == .glance {
+            HStack(spacing: 0) {
+                compactLeading
+                    .frame(width: NotchStage.glance.flare)
+                Color.clear
+                    .frame(width: max(state.notchHousing.width, 1))
+                compactTrailing
+                    .frame(width: NotchStage.glance.flare)
+            }
+            .contentShape(Rectangle())
+            .overlay(ImmediatePress { state.toggleNotch() })
+            .accessibilityLabel(whisper.line)
+            .accessibilityAddTraits(.isButton)
+        } else {
+            Color.clear
+        }
+    }
+
+    /// Cover art while music plays, otherwise the glyph for whatever is
+    /// running. Small, round, and hard against the cutout.
+    @ViewBuilder
+    private var compactLeading: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Group {
+                if subject == .media, let cover = state.music.cover {
+                    Image(nsImage: cover)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else {
+                    Image(systemName: compactSymbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(housingTint)
+                        .frame(width: 20, height: 20)
+                }
+            }
+            .padding(.trailing, 8)
+        }
+    }
+
+    /// The live indicator: bars while a track plays, a closing ring for the
+    /// hour, levels while dictating.
+    @ViewBuilder
+    private var compactTrailing: some View {
+        HStack {
+            Group {
+                switch subject {
+                case .media:
+                    KnurlEqualizer(
+                        tint: housingTint,
+                        bars: 4,
+                        active: state.music.isPlaying,
+                        lively: lively,
+                        height: 14
+                    )
+                case .flow:
+                    KnurlEqualizer(
+                        levels: state.voice.levels,
+                        tint: KnurlPalette.live,
+                        bars: 4,
+                        active: true,
+                        lively: lively,
+                        height: 14
+                    )
+                case .hour:
+                    NotchRing(
+                        progress: state.desk.timer.crownProgress,
+                        tint: housingTint,
+                        size: 16
+                    )
+                case .dial:
+                    KnurlPip(tint: housingTint, live: false, lively: lively, size: 6)
+                }
+            }
+            .padding(.leading, 8)
+            Spacer(minLength: 0)
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch stage {
-        case .rest: Color.clear
-        case .glance: glanceLine
+        case .rest, .glance: Color.clear
         case .hover: hoverBar
         case .shelf: glanceShelf
         case .flow: flowShelf
         }
-    }
-
-    // MARK: Glance
-    //
-    // Five points tall, no text, no glyph. Everything the old compact island
-    // said in words is already on the menu bar and in the Hub; down here the
-    // only job is "something is running, and this much of it is left", which
-    // one lit line does without ever looking like a bar bolted to the bezel.
-
-    private var glanceLine: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            Capsule()
-                .fill(housingTint)
-                .frame(
-                    width: max(18, width * 0.5 * DialMath.clampVolume(housingProgress ?? 1)),
-                    height: 3
-                )
-                .shadow(color: housingTint.opacity(0.7), radius: 3)
-                .frame(width: width, alignment: .center)
-        }
-        .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.horizontal, 24)
-        .contentShape(Rectangle())
-        .accessibilityLabel(whisper.line)
     }
 
     // MARK: Subject
@@ -350,40 +411,29 @@ struct NotchView: View {
                 onEnded: { if state.control == .output { state.finishOutputTurn() } }
             )
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 5) {
-                    ForEach(DialMode.allCases) { mode in
-                        faceKey(mode)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 7) {
+                NotchScrubber(
+                    symbol: state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                    progress: state.volumeProgress,
+                    tint: DialSwatch.tint(.volume, state: state),
+                    label: "Volume"
+                ) { state.setRoomVolume($0) }
+
+                NotchScrubber(
+                    symbol: "sun.max.fill",
+                    progress: Double(state.brightnessPercent) / 100,
+                    tint: DialSwatch.bright,
+                    label: "Brightness"
+                ) { state.setRoomBrightness($0) }
+
                 HStack(spacing: 8) {
                     notchTextButton("Hub") { state.presentHub() }
                     notchTextButton("Settings") { AppDelegate.shared?.openSettings() }
                     Spacer(minLength: 0)
-                    notchTextButton("Quit") { NSApp.terminate(nil) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func faceKey(_ mode: DialMode) -> some View {
-        let selected = state.control == mode
-        let tint = DialSwatch.tint(mode, state: state)
-        return Image(systemName: mode.symbol)
-            .font(.system(size: 11, weight: .semibold))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(selected ? .white : .white.opacity(0.55))
-            .frame(width: 30, height: 26)
-            .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? tint.opacity(0.9) : .white.opacity(0.08))
-            }
-            .overlay(ImmediatePress {
-                if selected { state.confirmDial() } else { state.selectControl(mode) }
-            })
-            .accessibilityLabel(mode.title)
-            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func notchTextButton(_ title: String, action: @escaping () -> Void) -> some View {

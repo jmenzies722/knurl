@@ -60,7 +60,16 @@ final class NowPlaying {
     /// pause — arrives as a notification, so a parked Knurl only polls to
     /// correct drift. Five seconds of drift on an interpolated playhead is
     /// under a frame's worth of error.
-    private var pollInterval: TimeInterval { attentive ? 0.5 : 5 }
+    /// Even with the Hub open, two seconds is plenty.
+    ///
+    /// The playhead on screen is interpolated from the last stamp against a
+    /// local clock, so polling faster does not make it smoother — it just
+    /// asks another process the same question more often. Track changes and
+    /// play/pause arrive as notifications, and Knurl's own commands update
+    /// optimistically. A profile of the open Hub had a third of the main
+    /// thread's time inside an Apple Event round-trip at the old half-second
+    /// rate, and Music.app burning its own core answering.
+    private var pollInterval: TimeInterval { attentive ? 2 : 5 }
     private var stampedPosition = 0.0
     private var stampedAt = Date()
     private var seeking = false

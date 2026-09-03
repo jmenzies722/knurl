@@ -36,6 +36,7 @@ final class NotchPanel {
     private var hoverLocal: Any?
     private var hoverGlobal: Any?
     private var closeWork: Task<Void, Never>?
+    private var openWork: Task<Void, Never>?
 
     var hasHousing: Bool { notchedScreen() != nil }
 
@@ -126,11 +127,26 @@ final class NotchPanel {
         if inside {
             closeWork?.cancel()
             closeWork = nil
-            if !state.notchHovered {
+            guard !state.notchHovered else { return }
+            // Wait for intent. Without this, any pointer travelling to the
+            // menu bar clips the target and throws the notch open on its way
+            // past — which is most of what makes it feel like it is in the
+            // way rather than waiting for you.
+            guard openWork == nil else { return }
+            openWork = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(260))
+                guard !Task.isCancelled,
+                      let state = AppDelegate.shared?.state,
+                      NotchMath.hoverTarget(housing: state.notchHousing)
+                          .contains(NSEvent.mouseLocation)
+                else { return }
                 state.notchHovered = true
                 DialTick.play()
             }
-        } else if state.notchHovered {
+        } else if state.notchHovered || openWork != nil {
+            openWork?.cancel()
+            openWork = nil
+            guard state.notchHovered else { return }
             // A short grace period, because the fastest way to make a hover
             // target feel broken is to close it the instant the pointer
             // clips a corner on the way to a button inside it.

@@ -973,6 +973,7 @@ private struct CrownDial: View {
             levels: state.control == .mic && state.voice.isActive ? state.voice.levels : nil,
             pulsing: (state.control == .media && state.music.isPlaying)
                 || (state.control == .mic && state.voice.isActive),
+            animatesValue: !(state.control == .media && state.music.isPlaying),
             onTurn: { state.applyControl($0, settleOutput: false) },
             onConfirm: { state.confirmDial() },
             onEnded: { if state.control == .output { state.finishOutputTurn() } }

@@ -37,6 +37,11 @@ struct DeskCrown: View {
     var levels: [Float]? = nil
     /// Whether the thing this dial controls is currently making noise.
     var pulsing: Bool = false
+    /// False for values that move on their own, like a playhead. Animating
+    /// those keeps the arc permanently mid-spring: it redraws every frame to
+    /// chase a target that has already moved, for a change of a fraction of a
+    /// percent that nobody can see.
+    var animatesValue: Bool = true
     var onTurn: (Double) -> Void
     var onConfirm: () -> Void
     var onEnded: (() -> Void)? = nil
@@ -76,14 +81,11 @@ struct DeskCrown: View {
         .onModifierKeysChanged { _, next in modifiers = next }
         .gesture(turnGesture)
         .onTapGesture(perform: onConfirm)
-        .modifier(CrownScroll(active: hovering) { delta in
-            scrollCarry += delta
-            let step = 1.0 / Double(max(ticks - 1, 1))
-            while abs(scrollCarry) >= step {
-                let direction: Double = scrollCarry > 0 ? 1 : -1
-                scrollCarry -= step * direction
-                onTurn(DialMath.clampVolume(clamped + step * direction))
-            }
+        .modifier(CrownScroll(enabled: true) { delta in
+            // Applied straight to the value. Rounding to detents here is what
+            // made scrolling feel like a ratchet instead of a dial; the faces
+            // that want detents already round in DialState.
+            onTurn(DialMath.clampVolume(clamped + delta))
         })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(caption)
@@ -113,8 +115,8 @@ struct DeskCrown: View {
     // predict instead of discovering by accident.
 
     private var ringRadius: CGFloat { size * 0.5 - inset }
-    private var inset: CGFloat { size * 0.11 }
-    private var lineWidth: CGFloat { size * 0.085 }
+    private var inset: CGFloat { size * 0.075 }
+    private var lineWidth: CGFloat { size * 0.072 }
 
     private var turnGesture: some Gesture {
         DragGesture(minimumDistance: 0)
@@ -159,13 +161,13 @@ struct DeskCrown: View {
             .fill(
                 RadialGradient(
                     stops: [
-                        .init(color: tint.opacity(0.50), location: 0.30),
-                        .init(color: tint.opacity(0.22), location: 0.58),
+                        .init(color: tint.opacity(0), location: 0.62),
+                        .init(color: tint.opacity(0.42), location: 0.80),
                         .init(color: tint.opacity(0), location: 1),
                     ],
                     center: .center,
                     startRadius: 0,
-                    endRadius: size * 0.70
+                    endRadius: size * 0.60
                 )
             )
             .opacity(0.30 + 0.34 * clamped + (hovering ? 0.10 : 0))
@@ -175,7 +177,7 @@ struct DeskCrown: View {
             // paid every time the playhead moved. Widening the gradient's
             // falloff gets the same softness for nothing.
             .scaleEffect(1.14)
-            .animation(animates ? KnurlMotion.settle : nil, value: clamped)
+            .animation(animates ? valueMotion : nil, value: clamped)
             .allowsHitTesting(false)
     }
 
@@ -240,8 +242,9 @@ struct DeskCrown: View {
     /// While you are dragging, the arc must not lag your pointer — anything
     /// with settle time reads as the dial resisting you. Once you let go, or
     /// when the value arrives from somewhere else, it can afford to glide.
-    private var valueMotion: Animation {
-        dragging ? .interactiveSpring(duration: 0.12) : .smooth(duration: 0.32)
+    private var valueMotion: Animation? {
+        guard animatesValue else { return nil }
+        return dragging ? .interactiveSpring(duration: 0.12) : .smooth(duration: 0.32)
     }
 
     /// The thing you grab. A dial without a visible handle is a dial you have
@@ -274,7 +277,7 @@ struct DeskCrown: View {
             artwork
                 .resizable()
                 .scaledToFill()
-                .frame(width: size * 0.56, height: size * 0.56)
+                .frame(width: size * 0.66, height: size * 0.66)
                 .clipShape(Circle())
                 .overlay { Circle().strokeBorder(.white.opacity(0.10), lineWidth: 1) }
                 .shadow(color: .black.opacity(0.35), radius: size * 0.04)
@@ -326,7 +329,7 @@ struct DeskCrown: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, size * 0.22)
+        .padding(.horizontal, size * 0.18)
         .allowsHitTesting(false)
     }
 
@@ -340,30 +343,47 @@ struct DeskCrown: View {
 
 // MARK: - Scroll to turn
 //
-// SwiftUI has no scroll-wheel hook on macOS, and putting an NSView in the way
-// would eat the drag and the click. A local monitor that only runs while the
-// pointer is over the dial costs nothing and leaves hit testing alone.
+// The previous version installed a global scroll monitor whenever SwiftUI
+// thought the pointer was over the dial, and swallowed every scroll event
+// while it was up. Two problems: `.onHover` goes stale when a window moves
+// under the pointer, so the monitor could stay installed and eat the Hub's
+// own scrolling; and it converted the wheel into whole detents, which is why
+// it felt like notches rather than a dial.
+//
+// This one asks where the pointer actually is, in screen coordinates, on each
+// event. If it is not over the dial the event is passed through untouched.
+// And it applies the delta continuously — the wheel moves the value by the
+// distance you scrolled, not to the next detent.
 
 private struct CrownScroll: ViewModifier {
-    var active: Bool
+    var enabled: Bool
     var onScroll: (Double) -> Void
 
     @State private var monitor: Any?
+    @State private var frame: CGRect = .zero
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: active) { _, isActive in
-                if isActive { install() } else { remove() }
-            }
+            .background(
+                CrownFrameReader { frame = $0 }
+                    .allowsHitTesting(false)
+            )
+            .onAppear(perform: install)
             .onDisappear(perform: remove)
     }
 
     private func install() {
-        guard monitor == nil else { return }
+        guard monitor == nil, enabled else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            let point = NSEvent.mouseLocation
+            guard frame.width > 1, frame.contains(point) else { return event }
+
+            // Trackpads report many small precise deltas; a wheel reports few
+            // large ones. Both are normalised to a fraction of the dial's
+            // full sweep, so the same physical gesture moves the same amount.
             let raw = event.hasPreciseScrollingDeltas
-                ? event.scrollingDeltaY / 220
-                : event.scrollingDeltaY / 12
+                ? event.scrollingDeltaY / 260
+                : event.scrollingDeltaY / 26
             if raw != 0 { onScroll(Double(raw)) }
             return nil
         }
@@ -373,6 +393,47 @@ private struct CrownScroll: ViewModifier {
         if let monitor {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
+        }
+    }
+}
+
+/// Reports the view's frame in screen coordinates, which is the only space a
+/// global scroll event's location can be compared against.
+private struct CrownFrameReader: NSViewRepresentable {
+    var onChange: (CGRect) -> Void
+
+    func makeNSView(context: Context) -> NSView { FrameView(onChange: onChange) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? FrameView)?.onChange = onChange
+        (view as? FrameView)?.report()
+    }
+
+    final class FrameView: NSView {
+        var onChange: (CGRect) -> Void
+
+        init(onChange: @escaping (CGRect) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            report()
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            report()
+        }
+
+        func report() {
+            guard let window else { return }
+            let inWindow = convert(bounds, to: nil)
+            onChange(window.convertToScreen(inWindow))
         }
     }
 }
@@ -412,25 +473,25 @@ struct DeskCrownBank: View {
     var body: some View {
         Group {
             if wide {
-                HStack(alignment: .center, spacing: KnurlSpace.stage) {
+                HStack(alignment: .center, spacing: KnurlSpace.hall) {
                     heroColumn
-                    VStack(alignment: .leading, spacing: KnurlSpace.room) {
-                        hint
-                        satellites(columns: 2)
+                    VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                        deskRows
                         if hero == .output {
                             OutputDestinationRail(state: state)
                         }
+                        hint
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 VStack(spacing: KnurlSpace.room) {
                     heroColumn
-                    hint
+                    deskRows
                     if hero == .output {
                         OutputDestinationRail(state: state).frame(maxWidth: 540)
                     }
-                    satellites(columns: 4)
+                    hint
                 }
             }
         }
@@ -455,6 +516,32 @@ struct DeskCrownBank: View {
             .multilineTextAlignment(wide ? .leading : .center)
             .frame(maxWidth: wide ? .infinity : 420, alignment: wide ? .leading : .center)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The faces the crown is not on, as rows you can drag directly.
+    ///
+    /// They used to be four more dials beside the hero, and the same five
+    /// faces appeared again as a strip below it — the same information twice,
+    /// neither copy adjustable without first landing the crown on it. A row
+    /// with a bar you can grab is both smaller and more useful, and it leaves
+    /// the hero as the only dial on the page, which is the point of a hero.
+    private var deskRows: some View {
+        VStack(spacing: KnurlSpace.tight) {
+            ForEach(DialMode.allCases.filter { $0 != hero }) { mode in
+                DeskFaceRow(
+                    state: state,
+                    mode: mode,
+                    tint: tint(mode),
+                    symbol: symbol(mode),
+                    value: shortReadout(mode),
+                    progress: progress(mode),
+                    adjustable: mode.isGauge,
+                    onSet: { turn(mode, $0) },
+                    onSelect: { state.selectControl(mode) },
+                    onConfirm: { confirm(mode) }
+                )
+            }
+        }
     }
 
     private func satellites(columns: Int) -> some View {
@@ -495,6 +582,7 @@ struct DeskCrownBank: View {
             levels: mode == .mic && state.voice.isActive ? state.voice.levels : nil,
             pulsing: (mode == .media && state.music.isPlaying)
                 || (mode == .mic && state.voice.isActive),
+            animatesValue: !(mode == .media && state.music.isPlaying),
             onTurn: { turn(mode, $0) },
             onConfirm: {
                 if state.control == mode {
@@ -527,11 +615,19 @@ struct DeskCrownBank: View {
 
     private func readout(_ mode: DialMode) -> String {
         switch mode {
-        case .volume: state.isMuted ? "Muted" : "\(state.volumePercent)"
-        case .brightness: "\(state.brightnessPercent)"
-        case .mic: state.isMicMuted ? "Muted" : "\(state.micPercent)"
-        case .output: state.outputName
-        case .media: state.music.cardTitle
+        case .volume: return state.isMuted ? "Muted" : "\(state.volumePercent)"
+        case .brightness: return "\(state.brightnessPercent)"
+        case .mic: return state.isMicMuted ? "Muted" : "\(state.micPercent)"
+        case .output: return state.outputName
+        case .media:
+            // With cover art in the well, the title on a chip over it is the
+            // album telling you its own name. The clock is the thing the art
+            // cannot say.
+            if cover != nil, state.music.canSeek {
+                let elapsed = state.music.displayedPlayhead() * state.music.duration
+                return DialMath.clock(elapsed)
+            }
+            return state.music.cardTitle
         }
     }
 
@@ -584,5 +680,107 @@ struct DeskCrownBank: View {
             return
         }
         state.confirmDial()
+    }
+}
+
+
+// MARK: - Face row
+//
+// One of the four faces the crown is not currently on. Gauges get a bar you
+// drag; Output and Media get a value and a tap, because "70% of the way to a
+// speaker" is not a thing.
+
+struct DeskFaceRow: View {
+    @Bindable var state: DialState
+    var mode: DialMode
+    var tint: Color
+    var symbol: String
+    var value: String
+    var progress: Double
+    var adjustable: Bool
+    var onSet: (Double) -> Void
+    var onSelect: () -> Void
+    var onConfirm: () -> Void
+
+    @State private var hovering = false
+    @State private var dragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: KnurlSpace.snug) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .frame(width: 20)
+                .contentTransition(.symbolEffect(.replace))
+                .overlay(ImmediatePress(action: onConfirm))
+
+            Text(mode.title)
+                .font(.knurlEyebrow)
+                .foregroundStyle(KnurlPalette.inkFaint)
+                .frame(width: 46, alignment: .leading)
+
+            if adjustable {
+                GeometryReader { geometry in
+                    let width = geometry.size.width
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(KnurlPalette.sunken)
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: max(6, width * DialMath.clampVolume(progress)))
+                            .shadow(color: tint.opacity(0.45), radius: 4)
+                    }
+                    .frame(height: dragging || hovering ? 9 : 7)
+                    .frame(maxHeight: .infinity, alignment: .center)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                dragging = true
+                                onSet(DialMath.clampVolume(value.location.x / max(width, 1)))
+                            }
+                            .onEnded { _ in dragging = false }
+                    )
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.14), value: dragging)
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.14), value: hovering)
+                }
+                .frame(height: 22)
+            } else {
+                Text(value)
+                    .font(.knurlBody.weight(.medium))
+                    .foregroundStyle(KnurlPalette.ink)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .overlay(ImmediatePress(action: onSelect))
+            }
+
+            if adjustable {
+                Text(value)
+                    .font(.knurlNumeral(13))
+                    .foregroundStyle(KnurlPalette.inkSoft)
+                    .frame(width: 42, alignment: .trailing)
+                    .contentTransition(reduceMotion ? .opacity : .numericText())
+            }
+        }
+        .padding(.horizontal, KnurlSpace.snug)
+        .padding(.vertical, 5)
+        .background {
+            RoundedRectangle(cornerRadius: KnurlRadius.chip, style: .continuous)
+                .fill(hovering ? KnurlPalette.control.opacity(0.7) : .clear)
+        }
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(mode.title)
+        .accessibilityValue(value)
+        .accessibilityAdjustableAction { direction in
+            guard adjustable else { return }
+            switch direction {
+            case .increment: onSet(min(1, progress + 0.05))
+            case .decrement: onSet(max(0, progress - 0.05))
+            default: break
+            }
+        }
     }
 }

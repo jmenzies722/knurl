@@ -109,3 +109,97 @@ struct NotchStageContainer<Content: View>: View {
             )
     }
 }
+
+// MARK: - Compact ring
+//
+// The trailing indicator for a countdown: a ring that closes as the hour runs
+// down. Sixteen points, so it has to say one thing and say it without a label.
+
+struct NotchRing: View {
+    var progress: Double
+    var tint: Color
+    var size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.16), lineWidth: size * 0.16)
+            Circle()
+                .trim(from: 0, to: DialMath.clampVolume(progress))
+                .stroke(tint, style: StrokeStyle(lineWidth: size * 0.16, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: tint.opacity(0.6), radius: 2)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Scrubber
+//
+// A level you set by dragging along it. The notch already has a dial, and a
+// dial is the right control when you want to feel your way to a value — but
+// when you know you want "about a third" the shortest path is a bar you touch
+// at the third. Both, rather than an argument about which is better.
+
+struct NotchScrubber: View {
+    var symbol: String
+    var progress: Double
+    var tint: Color
+    var label: String
+    var onSet: (Double) -> Void
+
+    @State private var dragging = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(dragging ? tint : .white.opacity(0.6))
+                .frame(width: 16)
+                .contentTransition(.symbolEffect(.replace))
+
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: max(6, width * DialMath.clampVolume(progress)))
+                        .shadow(color: tint.opacity(0.5), radius: 3)
+                }
+                .frame(height: dragging ? 8 : 6)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            dragging = true
+                            onSet(DialMath.clampVolume(value.location.x / max(width, 1)))
+                        }
+                        .onEnded { _ in dragging = false }
+                )
+                .animation(.snappy(duration: 0.14), value: dragging)
+            }
+            .frame(height: 18)
+
+            Text("\(Int((DialMath.clampVolume(progress) * 100).rounded()))")
+                .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 22, alignment: .trailing)
+                .contentTransition(.numericText())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue("\(Int((DialMath.clampVolume(progress) * 100).rounded())) percent")
+        .accessibilityAdjustableAction { direction in
+            let step = 0.05
+            switch direction {
+            case .increment: onSet(min(1, progress + step))
+            case .decrement: onSet(max(0, progress - step))
+            default: break
+            }
+        }
+    }
+}
