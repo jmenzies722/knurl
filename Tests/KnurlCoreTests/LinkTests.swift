@@ -54,6 +54,9 @@ struct CrownLinkTests {
             CrownRequest(action: .shuffle),
             CrownRequest(action: .repeat),
             CrownRequest(action: .pick, name: "Focus"),
+            CrownRequest(action: .talkStart),
+            CrownRequest(action: .talkEnd),
+            CrownRequest(action: .talkCancel),
         ]
         for request in actions {
             let data = try CrownJSON.encoder.encode(request)
@@ -70,5 +73,27 @@ struct CrownLinkTests {
         #expect(hello.mode == "volume")
         #expect(hello.art == nil)
         #expect(hello.playlists == nil)
+        #expect(hello.destination == nil)
+        #expect(hello.listening == nil)
+    }
+
+    @Test func destinationAndTalkRoundTrip() throws {
+        let hello = CrownHello(
+            host: "Mac",
+            mode: "mic",
+            readout: "62",
+            progress: 0.62,
+            target: "Mic",
+            destination: "Cursor",
+            listening: true,
+            preview: "open the file"
+        )
+        let decoded = try CrownJSON.decoder.decode(
+            CrownHello.self,
+            from: try CrownJSON.encoder.encode(hello)
+        )
+        #expect(decoded.destination == "Cursor")
+        #expect(decoded.listening == true)
+        #expect(decoded.preview == "open the file")
     }
 }

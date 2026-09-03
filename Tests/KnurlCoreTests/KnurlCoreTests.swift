@@ -111,6 +111,7 @@ import Testing
     #expect(whisper == .flow(destination: "Cursor"))
     #expect(whisper.line == "→ Cursor")
     #expect(whisper.detail == "→ Cursor")
+    #expect(whisper.symbol == "waveform")
 }
 
 @Test func notchWhisperPrefersTimerOverMusic() {
@@ -128,6 +129,7 @@ import Testing
     )
     #expect(whisper == .timer(remaining: "24:10"))
     #expect(whisper.detail == "Hour")
+    #expect(whisper.symbol == "timer")
 }
 
 @Test func notchWhisperPrefersAttentionOverMusic() {
@@ -144,6 +146,7 @@ import Testing
     )
     #expect(whisper == .attention(name: "Claude Code"))
     #expect(whisper.line.contains("needs you"))
+    #expect(whisper.symbol == "exclamationmark.circle.fill")
 }
 
 @Test func menuBarIslandPrefersFlowThenAttentionThenMusic() {
@@ -296,6 +299,30 @@ import Testing
     #expect(AudioOutputs.ranked([mac, pod, airpods]).map(\.uid) == ["bt", "ap", "mac"])
 }
 
+@Test func rememberedHomePodsJoinTheOutputRoster() {
+    let mac = AudioDevice(id: 1, uid: "mac", name: "MacBook Speakers", transport: .builtIn)
+    let remembered = [AirPlayDestination(uid: "kitchen", name: "Kitchen")]
+    let roster = AudioOutputs.roster([mac], remembered: remembered)
+    #expect(roster.map(\.uid) == ["kitchen", "mac"])
+    #expect(roster[0].transport == .airPlay)
+}
+
+@Test func airPlayNamesAreRecognized() {
+    #expect(AudioOutputs.isAirPlayNamed("Kitchen HomePod"))
+    #expect(AudioOutputs.isAirPlayNamed("AirPlay"))
+    #expect(!AudioOutputs.isAirPlayNamed("BoomAudio"))
+}
+
+@Test func musicAirPlayListParsesHomePod() {
+    let raw = "Comet\tHomePod\tfalse\ttrue\u{1f}Josh-MacBook-Pro\tcomputer\ttrue\ttrue\u{1f}"
+    let list = MusicAirPlayDevice.parseList(raw)
+    #expect(list.count == 2)
+    #expect(list[0].name == "Comet")
+    #expect(list[0].kind == .homePod)
+    #expect(list[0].uid == "music-airplay:Comet")
+    #expect(list[1].kind == .computer)
+}
+
 @Test func outputRosterAlwaysContainsTheCurrentDevice() {
     let route = AudioOutputs()
     guard let current = route.current else { return }
@@ -380,4 +407,415 @@ import Testing
     let live = mic.level
     guard live > 0.02 else { return }
     #expect(abs(live - 0.41) < 0.15)
+}
+
+// MARK: - Desk tools
+//
+// These run against the real machine on purpose. A mocked CPU sampler would
+// prove the arithmetic and nothing about whether `host_processor_info` was
+// called correctly, which is the only part that can actually be wrong.
+
+@Suite("Machine vitals")
+struct MachineVitalsTests {
+    @Test func cpuSamplerReportsEveryCoreOnThisMac() async throws {
+        var sampler = CPUSampler()
+        _ = sampler.sample()
+        // The first sample only seeds the counters; a rate needs two.
+        try await Task.sleep(for: .milliseconds(250))
+        let reading = sampler.sample()
+
+        #expect(reading.cores.count == ProcessInfo.processInfo.processorCount)
+        #expect(reading.overall >= 0 && reading.overall <= 1)
+        for load in reading.cores {
+            #expect(load >= 0 && load <= 1)
+        }
+    }
+
+    @Test func memoryReadsBackUnderTheInstalledTotal() {
+        var stats = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size
+        )
+        let result = withUnsafeMutablePointer(to: &stats) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        #expect(result == KERN_SUCCESS)
+
+        let page = UInt64(sysconf(_SC_PAGESIZE))
+        let used = (UInt64(stats.active_count) + UInt64(stats.wire_count)
+            + UInt64(stats.compressor_page_count)) * page
+        let total = ProcessInfo.processInfo.physicalMemory
+
+        #expect(used > 0)
+        #expect(used < total)
+
+        var vitals = MachineVitals()
+        vitals.memoryUsed = used
+        vitals.memoryTotal = total
+        #expect(vitals.memoryProgress > 0 && vitals.memoryProgress < 1)
+    }
+
+    @Test func networkSamplerReturnsANonNegativeRate() async throws {
+        var sampler = NetworkSampler()
+        _ = sampler.sample()
+        try await Task.sleep(for: .milliseconds(250))
+        let (down, up) = sampler.sample()
+        #expect(down >= 0)
+        #expect(up >= 0)
+    }
+
+    @Test func bootVolumeReportsRealCapacity() throws {
+        let values = try URL(fileURLWithPath: "/").resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]
+        )
+        let free = values.volumeAvailableCapacityForImportantUsage ?? 0
+        let total = Int64(values.volumeTotalCapacity ?? 0)
+        #expect(total > 0)
+        #expect(free > 0)
+        #expect(free <= total)
+    }
+
+    @Test func byteAndRateLabelsAreReadable() {
+        #expect(DeskFormat.bytes(0) != "")
+        #expect(DeskFormat.rate(0).hasSuffix("KB/s"))
+        #expect(DeskFormat.rate(2 * 1024 * 1024).hasSuffix("MB/s"))
+    }
+
+    @Test func uptimeLabelRollsUpThroughDays() {
+        var vitals = MachineVitals()
+        vitals.uptime = 90
+        #expect(vitals.uptimeLabel == "1m")
+        vitals.uptime = 3 * 3600 + 25 * 60
+        #expect(vitals.uptimeLabel == "3h 25m")
+        vitals.uptime = 2 * 86400 + 5 * 3600
+        #expect(vitals.uptimeLabel == "2d 5h")
+    }
+}
+
+@Suite("Keep awake")
+struct KeepAwakeTests {
+    /// Proves the assertion is genuinely registered with powerd rather than
+    /// just constructed: `pmset -g assertions` lists it by name while the
+    /// value is alive, and stops listing it once it is released.
+    @Test func assertionIsVisibleToPowerdWhileHeld() throws {
+        let reason = "Knurl test assertion \(UUID().uuidString)"
+
+        func assertionsOutput() -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+            process.arguments = ["-g", "assertions"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try? process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        #expect(!assertionsOutput().contains(reason))
+
+        var held: KeepAwakeAssertion? = KeepAwakeAssertion(reason: reason)
+        #expect(held != nil)
+        #expect(assertionsOutput().contains(reason))
+
+        held = nil
+        #expect(!assertionsOutput().contains(reason))
+    }
+}
+
+// MARK: - Notch stages
+//
+// Geometry for the housing island: one shape anchored under the cutout
+// that grows downward. These pin the invariants the drawing depends on — a
+// panel that is not top-anchored, or a stage narrower than the cutout, breaks
+// the illusion in a way that is obvious on screen and silent in a build.
+
+@Suite("Notch stages")
+struct NotchStageTests {
+    /// A real 16-inch MacBook Pro, measured: 2056×1329 with a 220×38 notch.
+    private let screen = CGRect(x: 0, y: 0, width: 2056, height: 1329)
+    private let visible = CGRect(x: 0, y: 92, width: 2056, height: 1198)
+    private var housing: CGRect {
+        NotchMath.housingFrame(
+            screen: screen,
+            visible: visible,
+            leftAux: CGRect(x: 0, y: 1291, width: 918, height: 38),
+            rightAux: CGRect(x: 1138, y: 1291, width: 918, height: 38)
+        )!
+    }
+
+    @Test func housingMatchesTheMeasuredCutout() {
+        #expect(housing.width == 220)
+        #expect(housing.minX == 918)
+        #expect(housing.maxY == screen.maxY)
+    }
+
+    @Test func panelIsTopAnchoredAndCentredOnTheCutout() {
+        let frame = NotchMath.panelFrame(screen: screen, housing: housing)
+        // Top-anchored: the shape's flat top edge has to sit behind the
+        // cutout, which is the only reason the seam is invisible.
+        #expect(frame.maxY == screen.maxY)
+        #expect(abs(frame.midX - housing.midX) < 0.001)
+        // Wide and tall enough for every stage plus the spring's overshoot.
+        for stage in NotchStage.allCases {
+            let size = NotchMath.contentSize(housing: housing, stage: stage)
+            #expect(size.width <= frame.width)
+            #expect(size.height <= frame.height)
+        }
+    }
+
+    @Test func everyStageIsAtLeastAsWideAsTheCutout() {
+        // Narrower than the notch and the fillets would curve inward from
+        // nothing, which reads as a bite taken out of the bezel.
+        for stage in NotchStage.allCases {
+            let size = NotchMath.contentSize(housing: housing, stage: stage)
+            #expect(size.width >= housing.width)
+            #expect(size.height >= housing.height)
+        }
+    }
+
+    @Test func restIsExactlyTheCutout() {
+        // The whole point: idle, there is nothing to see. A shape even a few
+        // points proud of the housing is a bar under the notch, not the notch.
+        let size = NotchMath.contentSize(housing: housing, stage: .rest)
+        #expect(size.width == housing.width)
+        #expect(size.height == housing.height)
+        #expect(NotchStage.rest.flare == 0)
+        #expect(NotchStage.rest.height == 0)
+    }
+
+    @Test func stagesGrowMonotonically() {
+        let order: [NotchStage] = [.rest, .glance, .hover, .shelf, .flow]
+        for (a, b) in zip(order, order.dropFirst()) {
+            #expect(a.height < b.height, "\(a) should be shorter than \(b)")
+        }
+        #expect(NotchStage.rest.flare < NotchStage.hover.flare)
+        #expect(NotchStage.rest.topCornerRadius < NotchStage.hover.topCornerRadius)
+        // Only the stages that show controls count as open.
+        #expect(!NotchStage.rest.isOpen)
+        #expect(!NotchStage.glance.isOpen)
+        #expect(NotchStage.hover.isOpen)
+        #expect(NotchStage.shelf.isOpen)
+        #expect(NotchStage.flow.isOpen)
+    }
+
+    @Test func hoverTargetIsForgivingButLocal() {
+        let target = NotchMath.hoverTarget(housing: housing)
+        // Dead centre of the cutout opens it.
+        #expect(target.contains(CGPoint(x: housing.midX, y: housing.midY)))
+        // So does a near miss just outside the edge, and just below it.
+        #expect(target.contains(CGPoint(x: housing.minX - 10, y: housing.midY)))
+        #expect(target.contains(CGPoint(x: housing.midX, y: housing.minY - 6)))
+        // The far end of the menu bar does not, and neither does the page.
+        #expect(!target.contains(CGPoint(x: 100, y: housing.midY)))
+        #expect(!target.contains(CGPoint(x: housing.midX, y: 400)))
+        // Nor does reaching up past the top of the screen.
+        #expect(!target.contains(CGPoint(x: housing.midX, y: housing.minY - 40)))
+    }
+
+    @Test func openTargetCoversTheWholeOpenShape() {
+        // While open, the pointer must be able to reach any control inside
+        // without the shape closing under it.
+        let target = NotchMath.openTarget(housing: housing, stage: .hover)
+        let size = NotchMath.contentSize(housing: housing, stage: .hover)
+        #expect(target.contains(CGPoint(x: housing.midX, y: housing.maxY - size.height + 4)))
+        #expect(target.contains(CGPoint(x: housing.midX - size.width / 2 + 4, y: housing.midY)))
+        #expect(target.width > NotchMath.hoverTarget(housing: housing).width)
+    }
+
+    @Test func aMacWithNoHousingReportsNone() {
+        #expect(NotchMath.housingFrame(
+            screen: screen, visible: visible, leftAux: nil, rightAux: nil
+        ) == nil)
+        // An external display: the two aux areas touch, so there is no gap.
+        #expect(NotchMath.housingFrame(
+            screen: screen,
+            visible: visible,
+            leftAux: CGRect(x: 0, y: 1291, width: 1028, height: 38),
+            rightAux: CGRect(x: 1028, y: 1291, width: 1028, height: 38)
+        ) == nil)
+    }
+}
+
+// MARK: - AirPlay parsing
+//
+// Pinned against the exact bytes Music.app returned on this desk, captured by
+// running the same AppleScript by hand. A parser for another process's output
+// format should be tested against that process's real output, not against a
+// string someone typed from memory.
+
+@Suite("AirPlay roster")
+struct AirPlayRosterTests {
+    /// Four devices, tab-separated fields, unit-separator between rows.
+    private let real = "Josh-MacBook-Pro\tcomputer\tfalse\ttrue\u{1f}"
+        + "Comet\tHomePod\ttrue\ttrue\u{1f}"
+        + "Roku TV\tTV\tfalse\ttrue\u{1f}"
+        + "Living Room Fire TV\tTV\tfalse\ttrue\u{1f}"
+
+    @Test func realMusicOutputParsesIntoNamedDevices() {
+        let devices = MusicAirPlayDevice.parseList(real)
+        #expect(devices.count == 4)
+        #expect(devices[0].name == "Josh-MacBook-Pro")
+        #expect(devices[0].kind == .computer)
+        #expect(devices[0].selected == false)
+        #expect(devices[1].name == "Comet")
+        #expect(devices[1].kind == .homePod)
+        #expect(devices[1].selected == true)
+        #expect(devices[2].name == "Roku TV")
+        #expect(devices[2].kind == .television)
+        // No device name may ever contain a field from its own row — that is
+        // what "computer false true" on screen looks like.
+        for device in devices {
+            #expect(!device.name.contains("\t"))
+            #expect(!device.name.lowercased().contains("false"))
+            #expect(!device.name.lowercased().contains("true"))
+        }
+    }
+
+    @Test func aRowMissingItsSeparatorIsRejectedNotMangled() {
+        // If the unit separator is ever lost, every field runs together. The
+        // parser must drop that rather than invent a device called
+        // "computer false true".
+        let mangled = "computer\tfalse\ttrue"
+        #expect(MusicAirPlayDevice.parseList(mangled).isEmpty)
+    }
+
+    @Test func emptyAndShortRowsAreDropped() {
+        #expect(MusicAirPlayDevice.parseList("").isEmpty)
+        #expect(MusicAirPlayDevice.parseList("\u{1f}\u{1f}").isEmpty)
+        #expect(MusicAirPlayDevice.parseList("OnlyAName\u{1f}").isEmpty)
+    }
+}
+
+// MARK: - Window manager
+//
+// The Accessibility half of Window Manager cannot be tested without granting
+// the permission, but the half that decides *where* a window goes is pure
+// geometry — and that is the half that produces a visibly wrong layout.
+
+@Suite("Workspace layout")
+struct WorkspaceLayoutTests {
+    private let visible = CGRect(x: 0, y: 92, width: 2056, height: 1198)
+
+    @Test func everySnapZoneLandsInsideTheDisplay() {
+        for zone in SnapZone.allCases {
+            let frame = WorkspaceMath.snap(zone, in: visible)
+            #expect(frame.width > 0)
+            #expect(frame.height > 0)
+            // A snapped window that starts above the menu bar or below the
+            // Dock is a window you cannot reach.
+            #expect(frame.minX >= visible.minX - 0.5)
+            #expect(frame.minY >= visible.minY - 0.5)
+            #expect(frame.maxX <= visible.maxX + 0.5)
+            #expect(frame.maxY <= visible.maxY + 0.5)
+        }
+    }
+
+    @Test func halvesTileWithoutOverlapOrGap() {
+        let left = WorkspaceMath.snap(.leftHalf, in: visible)
+        let right = WorkspaceMath.snap(.rightHalf, in: visible)
+        #expect(left.maxX == right.minX)
+        #expect(left.width + right.width == visible.width)
+
+        let top = WorkspaceMath.snap(.topHalf, in: visible)
+        let bottom = WorkspaceMath.snap(.bottomHalf, in: visible)
+        #expect(bottom.maxY == top.minY)
+        #expect(top.height + bottom.height == visible.height)
+    }
+
+    @Test func thirdsCoverTheDisplayExactly() {
+        let zones: [SnapZone] = [.leftThird, .centerThird, .rightThird]
+        let frames = zones.map { WorkspaceMath.snap($0, in: visible) }
+        #expect(abs(frames.map(\.width).reduce(0, +) - visible.width) < 0.5)
+        #expect(frames[0].maxX == frames[1].minX)
+        #expect(abs(frames[1].maxX - frames[2].minX) < 0.5)
+    }
+
+    @Test func presetsProduceOneFramePerWindowAndStayOnScreen() {
+        for preset in WorkspacePreset.allCases {
+            for count in 1 ... 4 {
+                let frames = WorkspaceMath.frames(for: preset, visible: visible, count: count)
+                #expect(frames.count == count, "\(preset) with \(count) windows")
+                for frame in frames where frame != .null {
+                    #expect(frame.width > 0)
+                    #expect(frame.height > 0)
+                    #expect(frame.minX >= visible.minX - 0.5)
+                    #expect(frame.maxX <= visible.maxX + 0.5)
+                    #expect(frame.minY >= visible.minY - 0.5)
+                    #expect(frame.maxY <= visible.maxY + 0.5)
+                }
+            }
+        }
+    }
+
+    @Test func appKitAndAccessibilityFramesRoundTrip() {
+        // The two coordinate systems disagree about which way is up, and
+        // getting this wrong puts windows off the bottom of the screen.
+        let primaryHeight: CGFloat = 1329
+        let appKit = CGRect(x: 120, y: 300, width: 900, height: 600)
+        let ax = WorkspaceMath.axFrame(from: appKit, primaryHeight: primaryHeight)
+        let back = WorkspaceMath.appKitFrame(from: ax, primaryHeight: primaryHeight)
+        #expect(back == appKit)
+        #expect(ax.minY == primaryHeight - appKit.maxY)
+    }
+
+    @Test func canvasAndScreenCoordinatesRoundTrip() {
+        let canvas = CGSize(width: 600, height: 350)
+        let frame = CGRect(x: 400, y: 500, width: 800, height: 500)
+        let rect = WorkspaceMath.canvasRect(frame, in: visible, canvas: canvas)
+        let origin = WorkspaceMath.screenPoint(
+            from: CGPoint(x: rect.minX, y: rect.minY),
+            visible: visible,
+            canvasSize: canvas
+        )
+        #expect(abs(origin.x - frame.minX) < 1)
+        #expect(abs(origin.y - frame.maxY) < 1)
+    }
+}
+
+// MARK: - Snapshot parsing
+//
+// The track parser must never accept an AirPlay roster. Both scripts return
+// unit-separated rows, so when two of them ran concurrently on different
+// threads — which `NSAppleScript` does not allow — the snapshot happily
+// parsed a speaker list into a song, and the Hub showed "Josh-MacBook-Pro
+// computer true true" as the track title. The scripts are now on one serial
+// queue, and this pins the shape so the parser also refuses on its own.
+
+@Suite("Track snapshot")
+struct TrackSnapshotTests {
+    @Test func aRealSnapshotParses() {
+        let raw = "STEP (feat. BXKS)\u{1f}ayrtn\u{1f}STEP (feat. BXKS) - Single"
+            + "\u{1f}playing\u{1f}47.5\u{1f}180.0\u{1f}false\u{1f}off\u{1f}Hip-Hop"
+        let track = MusicSnapshot.parse(raw)
+        #expect(track.title == "STEP (feat. BXKS)")
+        #expect(track.artist == "ayrtn")
+        #expect(track.isPlaying)
+        #expect(track.position == 47.5)
+        #expect(track.duration == 180.0)
+        #expect(track.genre == "Hip-Hop")
+    }
+
+    @Test func anAirPlayRosterIsNotATrack() {
+        // The exact corruption that shipped: the AirPlay roster fed into the
+        // snapshot parser. A tab in the title is the tell — a snapshot field
+        // never contains one, because tab is the AirPlay row's separator.
+        let roster = "Josh-MacBook-Pro\tcomputer\ttrue\ttrue"
+            + "\u{1f}Comet\tHomePod\tfalse\ttrue"
+            + "\u{1f}Roku TV\tTV\tfalse\ttrue"
+        let track = MusicSnapshot.parse(roster)
+        #expect(track.title.isEmpty, "a device row must not become a song title")
+        #expect(track.artist.isEmpty)
+        #expect(track.album.isEmpty)
+    }
+
+    @Test func aStoppedPlayerParsesToNothingPlaying() {
+        let raw = "\u{1f}\u{1f}\u{1f}stopped\u{1f}0\u{1f}0\u{1f}false\u{1f}off\u{1f}"
+        let track = MusicSnapshot.parse(raw)
+        #expect(track.title.isEmpty)
+        #expect(!track.isPlaying)
+        #expect(track.duration == 0)
+    }
 }
