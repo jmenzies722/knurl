@@ -21,6 +21,8 @@ final class DeskContext {
 
     let power = PowerWatch()
     let windows = WindowCatalog()
+    let tools = DeskToolbox()
+    let weather = WeatherDesk()
 
     var workingCount: Int { sessions.filter { $0.state == .working || $0.state == .starting }.count }
     var attention: [AgentSession] { sessions.filter(\.needsHuman) }
@@ -35,6 +37,8 @@ final class DeskContext {
         }
         power.start()
         windows.refresh()
+        tools.start()
+        weather.start()
     }
 
     func noteHarness(_ name: String) {

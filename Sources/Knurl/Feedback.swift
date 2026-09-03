@@ -7,10 +7,13 @@ enum Preferences {
     private static let hapticKey = "knurl.tick.haptic"
     private static let modeKey = "knurl.last.mode"
     private static let outputKey = "knurl.output.memory"
+    private static let airPlayKey = "knurl.airplay.memory"
     private static let hubFrameKey = "knurl.hub.frame"
     private static let windowManagerKey = "knurl.window.manager"
     private static let powerModeKey = "knurl.power.mode"
     private static let hubOrderKey = "knurl.hub.order"
+    private static let clipboardShelfKey = "knurl.clipboard.shelf"
+    private static let weatherKey = "knurl.weather.enabled"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -48,6 +51,21 @@ enum Preferences {
         set { UserDefaults.standard.set(newValue, forKey: windowManagerKey) }
     }
 
+    /// The clipboard shelf is off until asked for. It only ever lives in
+    /// memory, so this flag is the single place that decides whether Knurl
+    /// looks at the pasteboard at all.
+    static var clipboardShelf: Bool {
+        get { UserDefaults.standard.bool(forKey: clipboardShelfKey) }
+        set { UserDefaults.standard.set(newValue, forKey: clipboardShelfKey) }
+    }
+
+    /// Weather is the only tool that leaves this Mac and the only one that
+    /// needs Location, so it stays off until it is asked for.
+    static var weatherEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: weatherKey) }
+        set { UserDefaults.standard.set(newValue, forKey: weatherKey) }
+    }
+
     static var powerMode: PowerMode {
         get { PowerMode(rawValue: UserDefaults.standard.string(forKey: powerModeKey) ?? "") ?? .balanced }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: powerModeKey) }
@@ -80,6 +98,18 @@ enum Preferences {
         }
         set {
             UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: outputKey)
+        }
+    }
+
+    static var airPlayMemory: AirPlayMemory {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: airPlayKey),
+                  let memory = try? JSONDecoder().decode(AirPlayMemory.self, from: data)
+            else { return AirPlayMemory() }
+            return memory
+        }
+        set {
+            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: airPlayKey)
         }
     }
 }
