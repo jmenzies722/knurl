@@ -10,6 +10,28 @@ import ServiceManagement
 final class DialState {
     var isPresented = false
     var isNotchExpanded = false
+    var notchHovered = false
+    var notchPeeking = false
+    /// Real window visibility, not intent. Everything with a timeline reads
+    /// this through `\.knurlOnScreen` so a hidden surface costs nothing.
+    var hubVisible = false
+    var hudVisible = false
+    private var notchPeek: Task<Void, Never>?
+
+    /// How much of the notch is showing. Derived rather than stored so the
+    /// panel, the shape and the content can never disagree about which stage
+    /// they are drawing — the bug that made the first version flicker.
+    var notchStage: NotchStage {
+        if voice.isActive { return .flow }
+        if isNotchExpanded { return .shelf }
+        if notchHovered || notchPeeking { return .hover }
+        // Only show a line when there is genuinely something to report.
+        // Idle, the notch is the notch.
+        if desk.timer.running || music.isPlaying || !desk.attention.isEmpty {
+            return .glance
+        }
+        return .rest
+    }
     var notchHousing = CGRect.zero
     var notchExpanded = CGRect.zero
     var control: DialMode = Preferences.lastMode
@@ -63,6 +85,16 @@ final class DialState {
     private var lastObservedLevel: Float = 0
     private var lastObservedMute = false
     private var outputMemory = Preferences.outputMemory
+    private var airPlayMemory = Preferences.airPlayMemory
+    private var pendingAirPlay: AudioDevice?
+    private var outputSweep: Double?
+    private var airPlayConnectTask: Task<Void, Never>?
+    private var airPlayConnectGeneration = 0
+    private var airPlayConnecting = false
+    private var outputSettleTask: Task<Void, Never>?
+    private var musicAirPlay: [MusicAirPlayDevice] = []
+    private var lastAirPlayPull = Date.distantPast
+    private var airPlayPull: Task<Void, Never>?
     private let volume = SystemVolume()
     private let outputs = AudioOutputs()
     private let inputs = AudioInputs()
@@ -70,7 +102,9 @@ final class DialState {
     private var sessionTask: Task<Void, Never>?
     private var editor: NSRunningApplication?
     private var lastCrownSignature = ""
+    private var lastCrownPush = Date.distantPast
     private var outputRosterFrozen = false
+    private var outputFrozenAt: Date?
 
     var volumeProgress: Double { Double(volumePercent) / 100 }
 
@@ -100,7 +134,8 @@ final class DialState {
     }
 
     var outputProgress: Double {
-        DialMath.detentProgress(index: outputIndex, count: outputDevices.count)
+        if let outputSweep { return outputSweep }
+        return DialMath.detentProgress(index: outputIndex, count: outputDevices.count)
     }
 
     var controlAngle: Double { DialMath.ringAngle(progress: controlProgress) }
@@ -153,14 +188,60 @@ final class DialState {
         }
     }
 
+    /// Cold start, and every dismissal.
     func park() {
-        isPresented = false
         music.prepare()
-        HUDPanel.shared.parkCollapsed()
+        parkSurface()
+    }
+
+    /// Where this Mac parks: the notch if it has a housing, the pill above the
+    /// Dock if it does not.
+    ///
+    /// Every path that parks goes through here. `dismiss()` used to call
+    /// `HUDPanel.parkCollapsed()` directly, which is why the pill kept
+    /// reappearing over the Dock on a notched Mac — one code path respected
+    /// the notch and the other did not.
+    func parkSurface() {
+        isPresented = false
+        if hasNotchHousing {
+            HUDPanel.shared.hide()
+        } else {
+            HUDPanel.shared.parkCollapsed()
+        }
+    }
+
+    /// Show the dial on whichever surface this Mac parks on.
+    ///
+    /// A turn on the iPhone crown, or a menu-bar summon, should light the
+    /// notch on a notched Mac rather than throwing a panel over the Dock.
+    /// `show()` is still the right answer where there is no housing.
+    func revealDial() {
+        if hasNotchHousing {
+            peekNotch()
+        } else {
+            show()
+        }
+    }
+
+    /// Open the notch for a moment, then let it settle back on its own.
+    ///
+    /// Tracked separately from `notchHovered` so it cannot fight the pointer:
+    /// the hover monitor owns that flag, and a peek expiring must not close a
+    /// notch the pointer is still sitting in.
+    func peekNotch(for seconds: Double = 2.4) {
+        notchPeeking = true
+        notchPeek?.cancel()
+        notchPeek = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            notchPeeking = false
+        }
     }
 
     func show() {
-        rememberEditor()
+        if !voice.isActive {
+            rememberEditor()
+        }
         refreshMeters()
         message = nil
         isPresented = true
@@ -198,6 +279,9 @@ final class DialState {
     func startSession() {
         lastOutputUID = outputs.current?.uid
         desk.start()
+        voice.deliver = { [weak self] text in
+            await self?.landFlow(text)
+        }
         adoptHarness()
         OutputWatch.shared.start { [weak self] in
             self?.handleRouteChange()
@@ -215,7 +299,10 @@ final class DialState {
         sessionTask = Task { @MainActor in
             while !Task.isCancelled {
                 rememberCurrentVolume()
-                music.refresh()
+                music.attentive = isPresented
+                    || HubWindow.shared.isVisible
+                    || notchStage.isOpen
+                if music.needsPoll { music.refresh() }
                 refreshMeters()
                 tickHour()
                 StatusBar.shared.refresh(self)
@@ -225,14 +312,13 @@ final class DialState {
     }
 
     func dismiss() {
-        if flowOrigin == .hud {
-            endTalk()
+        if voice.isActive {
+            cancelTalk()
         }
-        isPresented = false
         if !HubWindow.shared.isVisible {
             stopMeters()
         }
-        HUDPanel.shared.parkCollapsed()
+        parkSurface()
         restoreEditor()
     }
 
@@ -255,9 +341,18 @@ final class DialState {
     }
 
     func presentHub() {
-        rememberEditor()
+        if !voice.isActive {
+            rememberEditor()
+        }
+        if hasNotchHousing {
+            collapseNotch()
+        }
         startMeters()
         HubWindow.shared.show()
+    }
+
+    func dismissSettings() {
+        wantsSettings = false
     }
 
     func hideHub() {
@@ -363,6 +458,7 @@ final class DialState {
     }
 
     func endTalk() {
+        if voice.discarded { return }
         let origin = flowOrigin
         Task {
             await voice.stop()
@@ -380,6 +476,7 @@ final class DialState {
     }
 
     func cancelTalk() {
+        voice.beginCancel()
         Task {
             await voice.cancel()
             flowOrigin = nil
@@ -416,6 +513,40 @@ final class DialState {
 
     func jumpToHarness() {
         restoreEditor()
+    }
+
+    /// Wispr-style handoff: leave Knurl, activate the dest, paste at the caret.
+    /// Never posts ⌘V into Knurl itself — that is the “paste bar” miss.
+    func landFlow(_ text: String) async {
+        guard !voice.discarded else { return }
+        HUDPanel.shared.resignForTarget()
+        HubWindow.shared.resignKey()
+        if isPresented {
+            park()
+        }
+        let dest = editor
+        let knurl = Bundle.main.bundleIdentifier
+        guard let dest, dest.bundleIdentifier != knurl else {
+            voice.message = "No editor to land in — your words are on the clipboard, press ⌘V."
+            return
+        }
+        dest.activate()
+        let deadline = Date().addingTimeInterval(0.5)
+        while Date() < deadline {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == dest.processIdentifier {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        guard !voice.discarded else { return }
+        // Never claim it landed when macOS will not let it land.
+        guard Voice.canPaste else {
+            voice.message = "Knurl needs Accessibility to paste. Your words are on the clipboard — press ⌘V."
+            return
+        }
+        voice.postPaste()
+        voice.message = "Landed in \(harnessName)"
     }
 
     func adoptSystemMeters() {
@@ -457,6 +588,10 @@ final class DialState {
         }
         switch event.keyCode {
         case UInt16(kVK_Escape):
+            if voice.isActive {
+                cancelTalk()
+                return true
+            }
             switch escape {
             case .dismissHUD:
                 dismiss()
@@ -493,6 +628,19 @@ final class DialState {
         guard event.momentumPhase.isEmpty else { return }
         let dy = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 10
         scrollCarry += dy
+        if activeTool == .hour {
+            let applied = scrollCarry
+            scrollCarry = 0
+            guard abs(applied) > 0.01 else { return }
+            let scale = event.hasPreciseScrollingDeltas ? 480.0 : 18.0
+            turnTool(DialMath.clampVolume(toolProgress - applied / scale))
+            return
+        }
+        if activeTool != nil {
+            if scrollCarry <= -28 { scrollCarry = 0; rotateTool(1) }
+            else if scrollCarry >= 28 { scrollCarry = 0; rotateTool(-1) }
+            return
+        }
         if control == .media, !music.canSeek {
             if scrollCarry <= -28 { scrollCarry = 0; rotateControl(1) }
             else if scrollCarry >= 28 { scrollCarry = 0; rotateControl(-1) }
@@ -503,7 +651,7 @@ final class DialState {
             scrollCarry = 0
             guard abs(applied) > 0.01 else { return }
             let scale = event.hasPreciseScrollingDeltas ? 480.0 : 18.0
-            applyControl(controlProgress - applied / scale)
+            applyControl(controlProgress - applied / scale, settleOutput: true)
             return
         }
         if scrollCarry <= -28 { scrollCarry = 0; rotateControl(1) }
@@ -536,27 +684,154 @@ final class DialState {
         applyVolume(detents)
     }
 
-    func selectOutput(_ device: AudioDevice) {
+    func pickOutput(_ device: AudioDevice) {
+        outputSweep = nil
+        selectOutput(device, commit: true)
+    }
+
+    func selectOutput(_ device: AudioDevice, commit: Bool = true) {
         rememberOutput()
-        outputs.select(device)
-        handleRouteChange()
+        previewOutput(device)
+        if isMusicAirPlay(device) {
+            if commit {
+                scheduleMusicAirPlay(device)
+            } else {
+                pendingAirPlay = device
+            }
+            DialTick.play()
+            return
+        }
+        cancelAirPlayConnect()
+        pendingAirPlay = nil
+        if outputs.select(device) {
+            if MusicApp.isOpen {
+                MusicApp.selectComputerAirPlay()
+            }
+            handleRouteChange()
+        }
         DialTick.play()
     }
 
-    func setOutputProgress(_ value: Double) {
-        outputRosterFrozen = true
-        let roster = outputDevices.isEmpty ? outputs.devices() : outputDevices
+    private func isMusicAirPlay(_ device: AudioDevice) -> Bool {
+        device.uid.hasPrefix(MusicAirPlayDevice.uidPrefix)
+            || (device.transport == .airPlay && device.id == 0)
+    }
+
+    private func previewOutput(_ device: AudioDevice) {
+        outputName = device.name
+        if isMusicAirPlay(device) {
+            outputKind = "HomePod"
+            outputUID = device.uid.hasPrefix(MusicAirPlayDevice.uidPrefix)
+                ? device.uid
+                : MusicAirPlayDevice.uidPrefix + device.name
+        } else {
+            outputKind = device.transport.title
+            outputUID = device.uid
+        }
+    }
+
+    private func cancelAirPlayConnect() {
+        airPlayConnectGeneration += 1
+        airPlayConnectTask?.cancel()
+        airPlayConnectTask = nil
+        airPlayConnecting = false
+    }
+
+    private func scheduleMusicAirPlay(_ device: AudioDevice) {
+        pendingAirPlay = nil
+        cancelAirPlayConnect()
+        freezeOutputRoster()
+        airPlayConnecting = true
+        airPlayConnectGeneration += 1
+        let generation = airPlayConnectGeneration
+        airPlayConnectTask = Task {
+            defer {
+                if generation == airPlayConnectGeneration {
+                    airPlayConnectTask = nil
+                    airPlayConnecting = false
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            await connectMusicAirPlay(device)
+        }
+    }
+
+    private func connectMusicAirPlay(_ device: AudioDevice) async {
+        await MusicApp.ensureOpen()
+        guard !Task.isCancelled else { return }
+        pullMusicAirPlay(force: true)
+        guard MusicApp.selectAirPlay(device.name) else {
+            guard !Task.isCancelled else { return }
+            message = MusicApp.lastError ?? "Couldn’t reach \(device.name)"
+            thawOutputRoster()
+            AirPlayGate.shared.present()
+            refreshMeters()
+            return
+        }
+        guard !Task.isCancelled else { return }
+        rememberAirPlay(device)
+        MusicApp.setAirPlayVolume(device.name, percent: volumePercent)
+        previewOutput(device)
+        outputUID = MusicAirPlayDevice.uidPrefix + device.name
+        outputKind = "HomePod"
+        message = device.name
+        pullMusicAirPlay(force: true)
+        if musicAirPlay.contains(where: { $0.selected && $0.kind != .computer && $0.name == device.name }) {
+            thawOutputRoster()
+        }
+        adoptOutputDevices(outputRoster())
+    }
+
+    func setOutputProgress(_ value: Double, settle: Bool = false) {
+        freezeOutputRoster()
+        outputSweep = DialMath.clampVolume(value)
+        let roster = outputDevices.isEmpty ? outputRoster() : outputDevices
         if outputDevices.isEmpty { outputDevices = roster }
-        let index = DialMath.detentIndex(progress: value, count: roster.count)
+        let index = DialMath.detentIndex(progress: outputSweep ?? value, count: roster.count)
         guard roster.indices.contains(index) else { return }
         if roster[index].uid != outputUID {
-            selectOutput(roster[index])
+            selectOutput(roster[index], commit: true)
+        }
+        if settle {
+            scheduleOutputSettle()
         }
     }
 
     func finishOutputTurn() {
-        outputRosterFrozen = false
+        outputSettleTask?.cancel()
+        outputSweep = nil
+        if let pending = pendingAirPlay {
+            pendingAirPlay = nil
+            selectOutput(pending, commit: true)
+            return
+        }
+        if airPlayConnecting {
+            return
+        }
+        thawOutputRoster()
         refreshMeters()
+    }
+
+    private func freezeOutputRoster() {
+        if !outputRosterFrozen {
+            outputFrozenAt = Date()
+        }
+        outputRosterFrozen = true
+    }
+
+    private func thawOutputRoster() {
+        outputRosterFrozen = false
+        outputFrozenAt = nil
+    }
+
+    private func scheduleOutputSettle() {
+        outputSettleTask?.cancel()
+        outputSettleTask = Task {
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled else { return }
+            finishOutputTurn()
+        }
     }
 
     func turnDial(at location: CGPoint, size: CGSize) {
@@ -564,11 +839,12 @@ final class DialState {
         let dy = location.y - size.height / 2
         let degrees = atan2(dx, -dy) * 180 / .pi
         guard let next = DialMath.ringProgress(clockwiseFromNoon: degrees) else { return }
-        if control == .media, !music.canSeek { return }
-        if control != .output {
-            guard DialMath.acceptsGaugeJump(from: controlProgress, to: next) else { return }
+        if activeTool != nil {
+            turnTool(next)
+            return
         }
-        applyControl(next)
+        if control == .media, !music.canSeek { return }
+        applyControl(next, settleOutput: false)
     }
 
     func selectControl(_ next: DialMode) {
@@ -581,6 +857,9 @@ final class DialState {
         Preferences.lastMode = next
         if next == .media {
             Task { await music.authorizeIfNeeded() }
+        }
+        if next == .output {
+            pullMusicAirPlay(force: true)
         }
         DialTick.play()
     }
@@ -612,6 +891,10 @@ final class DialState {
     }
 
     func confirmDial() {
+        if activeTool != nil {
+            confirmTool()
+            return
+        }
         switch control {
         case .volume: toggleMute()
         case .brightness: setRoomBrightness(0.5)
@@ -622,6 +905,13 @@ final class DialState {
     }
 
     func rotateControl(_ detents: Int) {
+        // A tool owns the crown while it is up. Without this, scroll and the
+        // arrow keys kept driving the face underneath, so scrubbing the Hour
+        // also moved volume or brightness.
+        if activeTool != nil {
+            rotateTool(detents)
+            return
+        }
         switch control {
         case .volume: applyVolume(detents)
         case .brightness:
@@ -633,13 +923,13 @@ final class DialState {
         }
     }
 
-    func applyControl(_ value: Double) {
+    func applyControl(_ value: Double, settleOutput: Bool = true) {
         switch control {
         case .volume: setRoomVolume(value)
         case .brightness: setRoomBrightness(value)
         case .mic: setRoomMic(value)
         case .output:
-            setOutputProgress(value)
+            setOutputProgress(value, settle: settleOutput)
         case .media:
             music.seek(to: value)
         }
@@ -655,6 +945,10 @@ final class DialState {
         let clamped = DialMath.clampVolume(value)
         if volume.isMuted { volume.isMuted = false }
         volume.level = Float(clamped)
+        if outputUID.hasPrefix(MusicAirPlayDevice.uidPrefix) {
+            let name = String(outputUID.dropFirst(MusicAirPlayDevice.uidPrefix.count))
+            MusicApp.setAirPlayVolume(name, percent: DialMath.percent(clamped))
+        }
         refreshMeters()
         rememberCurrentVolume()
         let detent = TickSound.detent(from: clamped)
@@ -677,7 +971,11 @@ final class DialState {
         let clamped = DialMath.clampVolume(value)
         if mic.isMuted { mic.isMuted = false }
         mic.level = Float(clamped)
-        refreshMeters()
+        micPercent = DialMath.percent(clamped)
+        isMicMuted = false
+        if mic.hasScalar {
+            refreshMeters()
+        }
     }
 
     func toggleMute() {
@@ -694,15 +992,17 @@ final class DialState {
     }
 
     func cycleSpeaker(_ detents: Int) {
-        rememberOutput()
-        outputs.cycle(by: detents)
-        handleRouteChange()
-        DialTick.play()
+        outputSweep = nil
+        let roster = outputDevices.isEmpty ? outputRoster() : outputDevices
+        guard !roster.isEmpty else { return }
+        if outputDevices.isEmpty { outputDevices = roster }
+        let count = roster.count
+        let next = ((outputIndex + detents) % count + count) % count
+        selectOutput(roster[next], commit: true)
     }
 
     func swapSpeaker() {
         swapOutput()
-        DialTick.play()
     }
 
     func tickHour() {
@@ -720,14 +1020,42 @@ final class DialState {
     /// tool switch in one place so a new tool only adds cases here.
     func turnTool(_ value: Double) {
         switch activeTool {
-        case .hour: setHourCrown(value)
-        case nil: break
+        case .hour:
+            setHourCrown(value)
+        case .power:
+            let modes = PowerMode.allCases
+            let index = min(modes.count - 1, max(0, Int(value * Double(modes.count - 1) + 0.5)))
+            if desk.powerMode != modes[index] {
+                desk.powerMode = modes[index]
+                DialTick.play()
+            }
+        case nil:
+            break
+        }
+    }
+
+    /// One detent of the active tool's crown, for scroll and arrow keys.
+    func rotateTool(_ detents: Int) {
+        switch activeTool {
+        case .hour:
+            setHourDuration(desk.timer.duration + Double(detents) * 60)
+        case .power:
+            let modes = PowerMode.allCases
+            guard let index = modes.firstIndex(of: desk.powerMode) else { return }
+            let next = min(modes.count - 1, max(0, index + detents))
+            if modes[next] != desk.powerMode {
+                desk.powerMode = modes[next]
+                DialTick.play()
+            }
+        case nil:
+            break
         }
     }
 
     func confirmTool() {
         switch activeTool {
         case .hour: toggleHour()
+        case .power: rotateTool(1)
         case nil: break
         }
     }
@@ -735,6 +1063,7 @@ final class DialState {
     var toolReadout: String {
         switch activeTool {
         case .hour: desk.timer.readout
+        case .power: desk.powerMode.title
         case nil: ""
         }
     }
@@ -742,21 +1071,36 @@ final class DialState {
     var toolCaption: String {
         switch activeTool {
         case .hour: desk.timer.running ? "Running" : "Set"
+        case .power: "\(desk.power.snapshot.percentLabel) · \(desk.power.snapshot.chargeLabel)"
         case nil: ""
         }
     }
 
     var toolSymbol: String {
         switch activeTool {
-        case .hour: desk.timer.running ? "pause.fill" : "play.fill"
-        case nil: "circle"
+        case .hour:
+            desk.timer.running ? "pause.fill" : "play.fill"
+        case .power:
+            switch desk.powerMode {
+            case .battery: "leaf.fill"
+            case .balanced: "bolt.fill"
+            case .performance: "bolt.horizontal.fill"
+            }
+        case nil:
+            "circle"
         }
     }
 
     var toolProgress: Double {
         switch activeTool {
-        case .hour: desk.timer.crownProgress
-        case nil: 0
+        case .hour:
+            return desk.timer.crownProgress
+        case .power:
+            let modes = PowerMode.allCases
+            let index = modes.firstIndex(of: desk.powerMode) ?? 0
+            return Double(index) / Double(max(modes.count - 1, 1))
+        case nil:
+            return 0
         }
     }
 
@@ -897,9 +1241,7 @@ final class DialState {
         case .media:
             skip(detents > 0 ? 1 : -1)
         case .output:
-            rememberOutput()
-            outputs.cycle(by: detents)
-            handleRouteChange()
+            cycleSpeaker(detents)
             message = outputName
         case .mic:
             applyMic(detents)
@@ -965,12 +1307,29 @@ final class DialState {
     }
 
     func applyCrown(_ request: CrownRequest) {
-        if !isPresented { show() }
+        switch request.action {
+        case .talkStart:
+            beginTalk(presentHUD: false)
+        case .talkEnd:
+            endTalk()
+        case .talkCancel:
+            cancelTalk()
+        default:
+            if !isPresented, !HubWindow.shared.isVisible { revealDial() }
+            applyCrownControl(request)
+        }
+        CrownServer.shared.broadcast()
+    }
+
+    private func applyCrownControl(_ request: CrownRequest) {
         switch request.action {
         case .rotate:
             if let progress = request.progress {
-                guard DialMath.acceptsGaugeJump(from: controlProgress, to: progress) else { break }
-                applyControl(progress)
+                if activeTool != nil {
+                    turnTool(progress)
+                } else {
+                    applyControl(progress)
+                }
             } else {
                 rotateControl(request.detents ?? 1)
             }
@@ -980,7 +1339,7 @@ final class DialState {
             if let raw = request.mode, let next = DialMode(rawValue: raw) {
                 selectControl(next)
             }
-        case .hello:
+        case .hello, .talkStart, .talkEnd, .talkCancel:
             break
         case .skip:
             skip(request.detents ?? 1)
@@ -993,7 +1352,6 @@ final class DialState {
                 pickCrown(name)
             }
         }
-        CrownServer.shared.broadcast()
     }
 
     private func pickCrown(_ name: String) {
@@ -1057,8 +1415,17 @@ final class DialState {
                 ).map { String($0.prefix(40)) }
                 : nil,
             devices: crownDevices,
-            deviceUID: crownDeviceUID
+            deviceUID: crownDeviceUID,
+            destination: harnessName,
+            listening: voice.isActive,
+            preview: crownPreview
         )
+    }
+
+    private var crownPreview: String? {
+        if !voice.preview.isEmpty { return voice.preview }
+        if !voice.lastTranscript.isEmpty { return voice.lastTranscript }
+        return nil
     }
 
     private var crownDevices: [CrownDevice]? {
@@ -1127,32 +1494,47 @@ final class DialState {
 
     private func rememberOutput() {
         if previousOutput == nil {
-            previousOutput = outputs.current
+            previousOutput = outputDevices.first(where: { $0.uid == outputUID }) ?? outputs.current
         }
     }
 
     private func swapOutput() {
-        let current = outputs.current
-        if let previousOutput, previousOutput.id != current?.id {
-            outputs.select(previousOutput)
+        outputSweep = nil
+        let roster = outputDevices.isEmpty ? outputRoster() : outputDevices
+        let current = roster.first(where: { $0.uid == outputUID }) ?? outputs.current
+        if let previousOutput, previousOutput.uid != current?.uid,
+           roster.contains(where: { $0.uid == previousOutput.uid }) {
+            let dest = previousOutput
             self.previousOutput = current
-        } else {
-            rememberOutput()
-            outputs.cycle(by: 1)
+            selectOutput(dest, commit: true)
+            message = outputName
+            return
         }
-        handleRouteChange()
+        rememberOutput()
+        cycleSpeaker(1)
         message = outputName
     }
 
     private var meterTask: Task<Void, Never>?
 
+    /// The meters loop, which re-reads the hardware so the room stays true
+    /// when something outside Knurl changes it.
+    ///
+    /// The rate is the point. 280 ms is right while a person is watching a
+    /// dial move; it is wasteful when the only reason the loop is alive is a
+    /// connected iPhone crown, which was making a parked Mac poll CoreAudio
+    /// three times a second forever. Changes Knurl makes are pushed to the
+    /// phone by `broadcast()` as they happen — this loop only exists to catch
+    /// changes made somewhere else.
     private func startMeters() {
         DisplayBrightness.watch()
         meterTask?.cancel()
         meterTask = Task { @MainActor in
-            while !Task.isCancelled, isPresented || HubWindow.shared.isVisible || CrownServer.shared.clientCount > 0 {
+            while !Task.isCancelled {
+                let watching = isPresented || HubWindow.shared.isVisible || notchStage.isOpen
+                guard watching || CrownServer.shared.clientCount > 0 else { break }
                 refreshMeters()
-                try? await Task.sleep(for: .milliseconds(280))
+                try? await Task.sleep(for: .milliseconds(watching ? 280 : 1000))
             }
         }
     }
@@ -1163,22 +1545,82 @@ final class DialState {
         DisplayBrightness.unwatch()
     }
 
+    /// Writes only when the value actually differs.
+    ///
+    /// `@Observable` invalidates on *assignment*, not on change. The meters
+    /// loop runs three and a half times a second while the Hub is open and
+    /// re-assigned every one of these — including two device arrays rebuilt
+    /// from CoreAudio each pass, which are never equal by identity. So every
+    /// view reading any of them was torn down and rebuilt continuously while
+    /// the Hub was simply sitting there: five crowns, their blurred blooms
+    /// and their gradient arcs, several times a second, to display numbers
+    /// that had not moved. Comparing first turns that into a redraw when
+    /// something actually happened.
+    private func set<Value: Equatable>(
+        _ keyPath: ReferenceWritableKeyPath<DialState, Value>,
+        _ next: Value
+    ) {
+        if self[keyPath: keyPath] != next {
+            self[keyPath: keyPath] = next
+        }
+    }
+
     private func refreshMeters() {
-        volumePercent = DialMath.percent(Double(volume.level))
-        isMuted = volume.isMuted
+        set(\.volumePercent, DialMath.percent(Double(volume.level)))
+        set(\.isMuted, volume.isMuted)
         if let live = DisplayBrightness.read() {
             DisplayBrightness.estimate = live
-            brightnessPercent = DialMath.percent(live)
+            set(\.brightnessPercent, DialMath.percent(live))
         }
-        outputName = outputs.current?.name ?? "No output"
-        outputKind = outputs.current?.transport.title ?? "Output"
-        outputUID = outputs.current?.uid ?? ""
-        adoptOutputDevices(outputs.devices())
-        inputName = inputs.current?.name ?? mic.deviceName
-        inputUID = inputs.current?.uid ?? ""
-        inputDevices = inputs.devices()
-        micPercent = DialMath.percent(Double(mic.level))
-        isMicMuted = mic.isMuted
+        if outputRosterFrozen {
+            pullMusicAirPlay(force: true)
+            if let pod = musicAirPlay.first(where: {
+                $0.selected && $0.kind != .computer && $0.uid == outputUID
+            }) {
+                set(\.outputName, pod.name)
+                set(\.outputKind, pod.kind.title)
+                set(\.outputUID, pod.uid)
+                if !airPlayConnecting {
+                    thawOutputRoster()
+                }
+            } else if !airPlayConnecting,
+                      let started = outputFrozenAt,
+                      Date().timeIntervalSince(started) > 2 {
+                thawOutputRoster()
+                if let pod = musicAirPlay.first(where: { $0.selected && $0.kind != .computer }) {
+                    set(\.outputName, pod.name)
+                    set(\.outputKind, pod.kind.title)
+                    set(\.outputUID, pod.uid)
+                } else {
+                    set(\.outputName, outputs.current?.name ?? "No output")
+                    set(\.outputKind, outputs.current?.transport.title ?? "Output")
+                    set(\.outputUID, outputs.current?.uid ?? "")
+                }
+            }
+        } else {
+            pullMusicAirPlay()
+            if let pod = musicAirPlay.first(where: { $0.selected && $0.kind != .computer }) {
+                set(\.outputName, pod.name)
+                set(\.outputKind, pod.kind.title)
+                set(\.outputUID, pod.uid)
+            } else {
+                set(\.outputName, outputs.current?.name ?? "No output")
+                set(\.outputKind, outputs.current?.transport.title ?? "Output")
+                set(\.outputUID, outputs.current?.uid ?? "")
+            }
+        }
+        adoptOutputDevices(outputRoster())
+        rememberAirPlay(outputs.current)
+        if let pod = musicAirPlay.first(where: { $0.selected && $0.kind != .computer }) {
+            rememberAirPlay(pod.asAudioDevice)
+        }
+        set(\.inputName, inputs.current?.name ?? mic.deviceName)
+        set(\.inputUID, inputs.current?.uid ?? "")
+        set(\.inputDevices, inputs.devices())
+        if mic.hasScalar {
+            set(\.micPercent, DialMath.percent(Double(mic.level)))
+        }
+        set(\.isMicMuted, mic.isMuted)
         music.refresh()
         if music.hasTrack {
             desk.noteMusic(music.title)
@@ -1192,9 +1634,17 @@ final class DialState {
 
     private func publishCrownIfNeeded() {
         let hello = crownHello()
-        let signature = "\(hello.mode)|\(hello.readout)|\(Int((hello.progress * 40).rounded()))|\(hello.muted ?? false)|\(hello.playing ?? false)|\(hello.title ?? "")|\(hello.shuffle ?? false)|\(hello.repeat ?? "")|\(hello.deviceUID ?? "")|\(coverJPEG()?.key ?? "")"
-        guard signature != lastCrownSignature else { return }
+        // The playhead is deliberately not in this signature. The phone
+        // interpolates it from the last hello exactly as the Mac does, so
+        // including it meant a fresh payload — and a fresh cover key lookup —
+        // three times a second for the whole length of a track, purely to
+        // move a needle the phone could already predict. Real changes push
+        // instantly; drift is corrected on a slow heartbeat instead.
+        let signature = "\(hello.mode)|\(hello.readout)|\(hello.muted ?? false)|\(hello.playing ?? false)|\(hello.title ?? "")|\(hello.shuffle ?? false)|\(hello.repeat ?? "")|\(hello.deviceUID ?? "")|\(hello.destination ?? "")|\(hello.listening ?? false)|\(hello.preview ?? "")"
+        let heartbeatDue = Date().timeIntervalSince(lastCrownPush) > 2
+        guard signature != lastCrownSignature || heartbeatDue else { return }
         lastCrownSignature = signature
+        lastCrownPush = Date()
         CrownServer.shared.broadcast()
     }
 
@@ -1213,6 +1663,37 @@ final class DialState {
         }
     }
 
+    private func outputRoster() -> [AudioDevice] {
+        pullMusicAirPlay()
+        let pods = musicAirPlay
+            .filter { $0.kind != .computer }
+            .map(\.asAudioDevice)
+        return AudioOutputs.roster(outputs.devices() + pods, remembered: airPlayMemory.destinations)
+    }
+
+    /// Kicks the AirPlay roster read off the main thread and lets the answer
+    /// land when it lands. It used to block here on an Apple Event; the roster
+    /// is re-read every couple of seconds anyway, so a tick of latency costs
+    /// nothing and a blocked main thread cost a visible stutter.
+    private func pullMusicAirPlay(force: Bool = false) {
+        if !force, Date().timeIntervalSince(lastAirPlayPull) < (music.attentive ? 2 : 5) { return }
+        lastAirPlayPull = Date()
+        guard airPlayPull == nil else { return }
+        airPlayPull = Task { @MainActor [weak self] in
+            let devices = await MusicApp.airPlayDevicesAsync()
+            guard let self, !Task.isCancelled else { return }
+            self.airPlayPull = nil
+            self.musicAirPlay = devices
+        }
+    }
+
+    private func rememberAirPlay(_ device: AudioDevice?) {
+        guard let device else { return }
+        guard device.transport == .airPlay || AudioOutputs.isAirPlayNamed(device.name) else { return }
+        airPlayMemory.remember(uid: device.uid, name: device.name)
+        Preferences.airPlayMemory = airPlayMemory
+    }
+
     private func handleRouteChange() {
         let next = outputs.current?.uid
         if let lastOutputUID, lastOutputUID != next {
@@ -1225,9 +1706,11 @@ final class DialState {
             volume.isMuted = snapshot.muted
         }
         refreshMeters()
-        outputName = outputs.current?.name ?? "No output"
-        if isPresented, mode == .output {
-            message = outputName
+        if !outputRosterFrozen {
+            outputName = outputs.current?.name ?? "No output"
+            if isPresented, mode == .output {
+                message = outputName
+            }
         }
     }
 
@@ -1236,17 +1719,30 @@ final class DialState {
     }
 
     func adoptHarness() {
+        guard !voice.isActive else { return }
         rememberEditor()
     }
 
+    /// Apps that can never be the Flow destination.
+    ///
+    /// Only Knurl itself, and the two places where "words land in Finder"
+    /// would be nonsense. Everything else you are actually working in — your
+    /// editor, your terminal, your browser — is a valid target, because the
+    /// whole point of Flow is that it lands where you already are.
+    private static let excludedHarnesses: Set<String> = [
+        "com.apple.finder",
+        "com.apple.systempreferences",
+    ]
+
     private func rememberEditor() {
-        let front = NSWorkspace.shared.frontmostApplication
-        if front?.bundleIdentifier != Bundle.main.bundleIdentifier {
-            editor = front
-            if let name = front?.localizedName, !name.isEmpty {
-                harnessName = name
-                desk.noteHarness(name)
-            }
+        guard !voice.isActive else { return }
+        guard let front = NSWorkspace.shared.frontmostApplication else { return }
+        guard let id = front.bundleIdentifier, id != Bundle.main.bundleIdentifier else { return }
+        guard !Self.excludedHarnesses.contains(id) else { return }
+        editor = front
+        if let name = front.localizedName, !name.isEmpty {
+            harnessName = name
+            desk.noteHarness(name)
         }
     }
 
@@ -1260,10 +1756,10 @@ final class DialState {
 
     private func adoptOutputDevices(_ next: [AudioDevice]) {
         guard outputRosterFrozen, !outputDevices.isEmpty else {
-            outputDevices = next
+            set(\.outputDevices, next)
             return
         }
         let incoming = Dictionary(uniqueKeysWithValues: next.map { ($0.uid, $0) })
-        outputDevices = outputDevices.map { incoming[$0.uid] ?? $0 }
+        set(\.outputDevices, outputDevices.map { incoming[$0.uid] ?? $0 })
     }
 }
