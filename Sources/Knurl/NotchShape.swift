@@ -153,12 +153,14 @@ struct NotchScrubber: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(dragging ? tint : .white.opacity(0.6))
-                .frame(width: 16)
-                .contentTransition(.symbolEffect(.replace))
+            if !symbol.isEmpty {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(dragging ? tint : .white.opacity(0.6))
+                    .frame(width: 16)
+                    .contentTransition(.symbolEffect(.replace))
+            }
 
             GeometryReader { geometry in
                 let width = geometry.size.width
@@ -184,11 +186,13 @@ struct NotchScrubber: View {
             }
             .frame(height: 18)
 
-            Text("\(Int((DialMath.clampVolume(progress) * 100).rounded()))")
-                .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: 22, alignment: .trailing)
-                .contentTransition(.numericText())
+            if !symbol.isEmpty {
+                Text("\(Int((DialMath.clampVolume(progress) * 100).rounded()))")
+                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.55))
+                    .frame(width: 22, alignment: .trailing)
+                    .contentTransition(.numericText())
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)

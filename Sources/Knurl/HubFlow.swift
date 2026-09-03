@@ -12,6 +12,7 @@ import SwiftUI
 struct HubFlow: View {
     @Bindable var state: DialState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var readiness = Voice.readiness
 
     private var live: KnurlLiveliness {
         KnurlLiveliness(reduceMotion: reduceMotion, powerAllows: state.desk.allowsDecorativeMotion)
@@ -24,7 +25,7 @@ struct HubFlow: View {
     var body: some View {
         HubPageScroll {
             header
-            if !Voice.canPaste { pasteGate }
+            if !readiness.isReady { setupCard }
             stage
             controls
             destination
@@ -33,6 +34,15 @@ struct HubFlow: View {
         }
         .animation(live.motion(KnurlMotion.heavy), value: state.voice.isActive)
         .animation(live.motion(), value: state.voice.lastTranscript)
+        .animation(live.motion(), value: readiness)
+        .onAppear { readiness = Voice.readiness }
+        // The Accessibility grant restarts the app, but microphone and speech
+        // do not — so the card has to notice when you come back from Settings.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            readiness = Voice.readiness
+        }
     }
 
     // MARK: Header
@@ -51,41 +61,107 @@ struct HubFlow: View {
         }
     }
 
-    /// Flow's one hard dependency, stated plainly.
+    /// What Flow needs, one line each, with the button that fixes it.
     ///
-    /// Speech recognition is on-device and needs nothing. Putting the words
-    /// into another app is a synthetic ⌘V, and macOS only delivers that to a
-    /// process it trusts. Without it Flow still transcribes — the text just
-    /// stops on the clipboard instead of arriving where you were typing.
-    private var pasteGate: some View {
-        HStack(alignment: .top, spacing: KnurlSpace.step) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(KnurlPalette.warn)
-            VStack(alignment: .leading, spacing: KnurlSpace.tight) {
-                Text("Flow can hear you, but it cannot type for you yet")
-                    .font(.knurlBody.weight(.semibold))
-                    .foregroundStyle(KnurlPalette.ink)
-                Text("Landing dictation in another app is a synthetic ⌘V, and macOS only delivers that to a trusted process. Until you allow Knurl in Accessibility, your words are copied and you press ⌘V yourself.\n\nmacOS quits and reopens Knurl the moment you flip that switch — that is expected, not a crash.")
-                    .font(.knurlEyebrow.weight(.regular))
-                    .foregroundStyle(KnurlPalette.inkSoft)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: KnurlSpace.tight) {
-                    HubGlassButton(title: "Allow Knurl", symbol: "checkmark.shield", tint: KnurlPalette.warn, selected: true) {
-                        Voice.requestPastePermission()
-                    }
-                    HubGlassButton(title: "Open Settings", symbol: "gearshape") {
-                        Voice.openAccessibilitySettings()
-                    }
+    /// This replaced a paragraph about Accessibility that was both incomplete
+    /// and unactionable. Flow needs three separate permissions and was asking
+    /// for all of them mid-gesture while the app was in the background, so the
+    /// prompts landed behind whatever you were working in. On this Mac the
+    /// microphone and speech permissions were still `notDetermined` after
+    /// weeks: nobody had ever seen them, and Flow just quietly did nothing.
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            HStack(spacing: KnurlSpace.snug) {
+                Image(systemName: "waveform.badge.exclamationmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(KnurlPalette.warn)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Flow needs three things")
+                        .font(.knurlBody.weight(.semibold))
+                        .foregroundStyle(KnurlPalette.ink)
+                    Text("Speech never leaves this Mac. Nothing here is on until you turn it on.")
+                        .font(.knurlEyebrow.weight(.regular))
+                        .foregroundStyle(KnurlPalette.inkSoft)
                 }
-                .padding(.top, 2)
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+
+            VStack(spacing: 1) {
+                readyRow(
+                    "Microphone",
+                    detail: "To hear you at all.",
+                    ok: readiness.microphone
+                ) { Task { readiness = await Voice.requestListening() } }
+
+                readyRow(
+                    "Speech recognition",
+                    detail: "On-device transcription. No cloud, no upload.",
+                    ok: readiness.speech
+                ) { Task { readiness = await Voice.requestListening() } }
+
+                readyRow(
+                    "Accessibility",
+                    detail: "To paste for you. Without it the words stop on the clipboard.",
+                    ok: readiness.paste
+                ) { Voice.requestPastePermission() }
+            }
+
+            if !readiness.isReady {
+                HStack(spacing: KnurlSpace.tight) {
+                    HubGlassButton(
+                        title: "Set up Flow",
+                        symbol: "checkmark.shield",
+                        tint: KnurlPalette.live,
+                        selected: true
+                    ) {
+                        Task {
+                            readiness = await Voice.requestListening()
+                            if !readiness.paste { Voice.requestPastePermission() }
+                        }
+                    }
+                    HubGlassButton(title: "Privacy Settings", symbol: "gearshape") {
+                        Voice.openPrivacySettings("Privacy_Microphone")
+                    }
+                    Text("macOS restarts Knurl when you grant Accessibility.")
+                        .font(.knurlEyebrow.weight(.regular))
+                        .foregroundStyle(KnurlPalette.inkFaint)
+                }
+            }
         }
         .padding(KnurlSpace.step)
-        .knurlSurface(.card, tint: KnurlPalette.warn, glow: 0.3)
+        .knurlSurface(.card, tint: readiness.isReady ? KnurlPalette.live : KnurlPalette.warn, glow: 0.25)
     }
 
+    private func readyRow(
+        _ title: String,
+        detail: String,
+        ok: Bool,
+        fix: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: KnurlSpace.snug) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dotted")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(ok ? KnurlPalette.live : KnurlPalette.inkFaint)
+                .contentTransition(.symbolEffect(.replace))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.knurlBody.weight(.medium))
+                    .foregroundStyle(KnurlPalette.ink)
+                Text(detail)
+                    .font(.knurlEyebrow.weight(.regular))
+                    .foregroundStyle(KnurlPalette.inkFaint)
+            }
+            Spacer(minLength: KnurlSpace.snug)
+            if !ok {
+                HubGlassButton(title: "Allow", tint: KnurlPalette.warn, action: fix)
+            }
+        }
+        .padding(.horizontal, KnurlSpace.snug)
+        .padding(.vertical, KnurlSpace.tight)
+    }
+
+    // MARK: Stage
     // MARK: Stage
 
     /// The one big thing on the page. A ring that closes as levels rise, a
@@ -176,11 +252,11 @@ struct HubFlow: View {
             HStack(spacing: KnurlSpace.snug) {
                 KnurlActionCard(
                     title: state.harnessName,
-                    detail: Voice.canPaste
+                    detail: readiness.paste
                         ? "Release pastes here with one synthetic ⌘V."
                         : "Not yet — allow Knurl in Accessibility and it will paste for you.",
                     symbol: "arrow.up.forward.app",
-                    tint: Voice.canPaste ? KnurlPalette.live : KnurlPalette.warn,
+                    tint: readiness.paste ? KnurlPalette.live : KnurlPalette.warn,
                     selected: true,
                     badge: "⌃⌥M"
                 ) {

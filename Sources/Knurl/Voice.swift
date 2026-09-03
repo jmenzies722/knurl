@@ -349,6 +349,58 @@ final class Voice {
         }
     }
 
+    /// The three things Flow needs, and whether it has them.
+    ///
+    /// All three were requested at the moment you first held the mic key —
+    /// which is the worst possible moment. Knurl is a background app then, so
+    /// the system prompts arrive behind whatever you were working in, over a
+    /// gesture you are still holding. Both this Mac's microphone and speech
+    /// permissions sat at `notDetermined` for the whole life of the feature:
+    /// nobody ever saw the prompts, so Flow silently did nothing.
+    ///
+    /// They are asked for explicitly now, from a page you are looking at.
+    struct Readiness: Equatable, Sendable {
+        var microphone: Bool
+        var speech: Bool
+        var paste: Bool
+
+        var isReady: Bool { microphone && speech && paste }
+        /// Flow can still hear and transcribe without Accessibility — it just
+        /// cannot type for you, so the words stop on the clipboard.
+        var canTranscribe: Bool { microphone && speech }
+    }
+
+    static var readiness: Readiness {
+        Readiness(
+            microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
+            speech: SFSpeechRecognizer.authorizationStatus() == .authorized,
+            paste: AXIsProcessTrusted()
+        )
+    }
+
+    /// Asks for microphone and speech with the app in front, so the prompts
+    /// land where the person is looking.
+    static func requestListening() async -> Readiness {
+        NSApp.activate(ignoringOtherApps: true)
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            _ = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+                AVCaptureDevice.requestAccess(for: .audio) { c.resume(returning: $0) }
+            }
+        }
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            _ = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+                SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0 == .authorized) }
+            }
+        }
+        return readiness
+    }
+
+    static func openPrivacySettings(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Whether macOS will actually deliver a synthetic ⌘V to another app.
     ///
     /// Posting to `.cghidEventTap` is Accessibility-gated. Without the

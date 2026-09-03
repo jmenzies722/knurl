@@ -586,23 +586,24 @@ struct NotchStageTests {
         #expect(NotchStage.rest.height == 0)
     }
 
-    @Test func theCompactStageWidensAndTheOpenStagesDrop() {
-        // Two different motions, and the difference is the design.
+    @Test func nothingWidensUntilItOpens() {
+        // The rule the notch lives by: its silhouette stays the cutout until
+        // you actually open it.
         //
-        // `glance` is Apple's compact Dynamic Island: it *widens* to put a
-        // glyph and an indicator either side of the cutout, and drops nothing
-        // below the housing. `hover` and beyond drop. Asserting a single
-        // ladder of heights would assert a design nobody chose — and did,
-        // until the compact stage stopped hanging a bar under the notch.
+        // A Mac has menu titles either side of the notch, so any width at rest
+        // covers somebody's File menu — and a black rectangle around the
+        // cutout with two small things floating in it reads as a bar stuck to
+        // the notch rather than as the notch. An iPhone's Dynamic Island can
+        // widen because there is nothing under there to hide.
         #expect(NotchStage.rest.height == 0)
         #expect(NotchStage.rest.flare == 0)
-
-        #expect(NotchStage.glance.height == 0, "compact must not drop below the housing")
-        #expect(NotchStage.glance.flare > 0, "compact is the stage that widens")
+        #expect(NotchStage.glance.flare == 0, "the live hint must not widen over the menu bar")
+        #expect(NotchStage.glance.height > 0, "but it must show something")
+        #expect(NotchStage.glance.height < 8, "and it must stay a hint, not a bar")
 
         for open in [NotchStage.hover, .shelf, .flow] {
-            #expect(open.height > 0, "\(open) must drop below the housing")
-            #expect(open.flare > NotchStage.glance.flare, "\(open) must be wider than compact")
+            #expect(open.height > NotchStage.glance.height, "\(open) must drop")
+            #expect(open.flare > 0, "\(open) may widen — you asked for it")
         }
         // The shelf carries the most: the dial, the scrubbers, the faces and
         // the exits.

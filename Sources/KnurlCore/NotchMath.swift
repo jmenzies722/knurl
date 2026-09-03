@@ -12,10 +12,13 @@ public enum NotchStage: String, Sendable, CaseIterable {
     /// under the housing is not "in the notch", it is a bar below the notch
     /// wearing the notch's colour.
     case rest
-    /// Something is genuinely happening. Content sits *beside* the cutout in
-    /// the menu bar strip — a leading glyph and a trailing indicator — which
-    /// is how Apple's Dynamic Island presents compactly. Hanging a bar below
-    /// the notch was the wrong model: the island widens, it does not drip.
+    /// Something is genuinely happening: one lit line, exactly the width of
+    /// the cutout.
+    ///
+    /// It does not widen. Widening put a black rectangle around the notch with
+    /// two small things floating in it — an obvious bar rather than the notch,
+    /// and it covered menu titles besides. An iPhone can widen because there
+    /// is nothing under there; a Mac cannot.
     case glance
     /// The pointer is on the housing: the dial and the controls drop out.
     case hover
@@ -27,14 +30,12 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var height: CGFloat {
         switch self {
         case .rest: 0
-        // Nothing below the housing: the compact stage lives in the housing
-        // row itself, flanking the cutout.
-        case .glance: 0
+        case .glance: 4
         case .hover: 60
         // The shelf carries the whole desk: what is playing, a dial you can
         // actually turn, the five faces, and the way out. It is the notch's
         // answer to a menu bar item, so it has to hold what one holds.
-        case .shelf: 178
+        case .shelf: 186
         case .flow: 132
         }
     }
@@ -48,10 +49,9 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var flare: CGFloat {
         switch self {
         case .rest: 0
-        // Deliberately small. This sits over the menu bar, and unlike an
-        // iPhone a Mac has menu titles under there — every point of width is
-        // a point of somebody's File menu covered up.
-        case .glance: 46
+        // Zero: the silhouette stays the cutout. This is the whole reason it
+        // reads as the notch rather than as something stuck to it.
+        case .glance: 0
         case .hover: 96
         // Wider than hover: the shelf carries cover art, a title, three
         // transport keys and two more besides. Sized to its content rather
@@ -73,7 +73,7 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var bottomCornerRadius: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 11
+        case .glance: 2
         case .hover: 16
         case .shelf, .flow: 20
         }
