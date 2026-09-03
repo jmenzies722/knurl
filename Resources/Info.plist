@@ -38,5 +38,11 @@
 	<array>
 		<string>_knurl._tcp</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Knurl uses your approximate location only to show local weather on the Tools page. The coordinate is rounded to about a kilometre before it leaves this Mac, and nothing else is sent.</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© Shua Labs</string>
 </dict>
 </plist>

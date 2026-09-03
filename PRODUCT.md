@@ -60,19 +60,51 @@ Knurl Flow. Escape parks the HUD.
    start parked. Close does not quit.
 2. **Side dial** — physical input for the five faces. Contextual
    “needs you” may appear. Never an Agent face.
-3. **Notch** — a whisper in the black camera housing. Click expands
-   a glass shelf from the housing. Not a miniature Hub. No glass on
-   the housing.
+3. **Notch** — the parked state on a notched Mac. One continuous black
+   shape that grows downward out of the camera housing, in four stages:
+   a compact Live Activity at rest (one glyph, one whisper), the dial
+   and glass controls on hover, a shelf on click, and Flow while
+   dictating. The top corners are *concave* — the fillet is what makes
+   the panel read as the notch itself growing rather than a rectangle
+   under it. Not a miniature Hub. No glass on the housing: the cutout
+   has no pixels, so material there is material on a bezel.
+
+   On a Mac with no housing the floating pill above the Dock is the
+   parked state instead. That is the only reason the pill still exists.
 
 ## Hub pages
 
 Home · Tools · Workspace · Flow · System · Sessions
 
-Home is the live room dashboard: five face tiles (tap to land the
-dial), the crown that follows the current face, and Feel chips for
-tick and haptic. Tools is Hour, dim the room, swap speakers, and Flow.
+Home leads with the crown, because the crown is what the app is. Under
+it the five faces are one compact strip — a lit edge marks where the
+dial actually is — then what is playing, then how the machine is
+holding up. Feel (tick sound, haptic) lives in Settings only: it is a
+preference you set once, not a control of the room, and having it in
+two places meant neither was the answer to "where do I change this". Tools is Hour, keep awake, dim the
+room, clear the room, swap speakers, Flow, the clipboard shelf, the
+app jump strip, and eject.
 
 Six is enough. Do not grow a seventeenth item.
+
+## Desk tools (not faces)
+
+Everything on Tools is a real system call through a public interface,
+and none of it asks for a new permission:
+
+- **Keep awake** — `IOPMAssertionCreateWithName`, the mechanism
+  `caffeinate` uses. Released on toggle, on timer, and on quit.
+- **Vitals** — `host_processor_info`, `host_statistics64`, `getifaddrs`
+  and the volume resource keys. CPU per core, memory, disk, network,
+  uptime.
+- **Clipboard shelf** — `NSPasteboard.changeCount`. Off by default,
+  memory only, never written to disk, gone when Knurl quits. It exists
+  because Flow already lands text on the clipboard.
+- **Clear the room** — `NSWorkspace.hideOtherApplications()`.
+- **Jump** — `NSWorkspace.runningApplications` and `activate`.
+- **Eject** — `NSWorkspace.unmountAndEjectDevice(at:)`.
+
+Adding a tool costs a tile. It must never cost a face or a permission.
 
 ## Session Layer (not a face)
 
@@ -90,24 +122,58 @@ Unlabeled simulator rows are a bug.
 
 ## Knurl Flow
 
-Hold ⌃⌥M → speak in the notch → release → paste into the
-remembered app. On a notched Mac this is a housing detent, not the
+Hold ⌃⌥M → speak in the notch → release → paste into the app you were
+in. On a notched Mac this is a housing detent, not the
 side dial. Black chip while listening; glass shelf drops for levels,
 words, destination, Hold / Release / Cancel. On-device
 `SpeechAnalyzer` + `DictationTranscriber`. Always show the destination.
 
 ## Window Manager
 
-Off by default. Enabling it is the first moment Knurl may ask for
-Accessibility. Public AX move / resize only. No Screen Recording,
+Off by default. Public AX move / resize only. No Screen Recording,
 no keystroke tiling, no SkyLight.
+
+## Accessibility, honestly
+
+Two things need it, and both say so on their face rather than failing
+quietly:
+
+- **Window Manager**, to move a window.
+- **Flow's microphone and speech**, requested the first time you hold it.
+- **Flow's paste.** Posting a synthetic ⌘V into another app is
+  Accessibility-gated; without it macOS drops the event silently, the
+  words stop on the clipboard, and Flow looks broken while reporting
+  success. Knurl checks before it claims to have landed anything.
+
+Nothing else asks, and the faces never do.
+
+## Weather
+
+The only part of Knurl that touches the network or your location, and
+it is off until you turn it on. Approximate location from CoreLocation,
+rounded to about a kilometre, sent to Open-Meteo — no account, no key —
+once every half hour. WeatherKit was rejected because it needs a paid
+entitlement and would fail silently in a local build.
 
 ## Design
 
 Notion information architecture + Apple physicality.
 
-Glass on faces, Flow, transport, toolbar, snap controls. Not on
-session rows, not on every card, not on the notch housing.
+The dial is one luminous ring — a soft bloom, a gradient arc and a grab
+handle. It was machined aluminium in an earlier pass; that read as a
+photograph of hardware and fought every soft surface near it. Scrubbing
+is 1:1 from wherever you grabbed, with ⌥ for quarter-speed.
+
+One design system, in `KnurlCore/KnurlDesign.swift`, shared by the Mac
+and the iPhone: `KnurlPalette`, `KnurlSpace`, `KnurlRadius`,
+`KnurlMotion`, and the parts built on them (`KnurlSurface`,
+`KnurlAtmosphere`, `KnurlBezel`, `KnurlMeter`, `KnurlPip`,
+`KnurlSparkline`). It lives in Core so the phone cannot drift from the
+Mac — they are two halves of one desk, not two apps that agree by hand.
+
+Glass on faces, Flow, transport, chips, snap controls. Not on session
+rows, not on every card, not on the notch housing. Cards get a
+`knurlSurface`: a fill, a lit hairline, a specular top edge, a shadow.
 
 ## Stack
 
