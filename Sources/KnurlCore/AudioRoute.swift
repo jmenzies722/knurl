@@ -85,6 +85,21 @@ public struct AudioOutputs: Sendable {
         return Self.ranked(list)
     }
 
+    /// Live Core Audio devices plus HomePods the user has already used.
+    public static func roster(_ live: [AudioDevice], remembered: [AirPlayDestination]) -> [AudioDevice] {
+        var list = live
+        var seen = Set(list.map(\.uid))
+        for dest in remembered where seen.insert(dest.uid).inserted {
+            list.append(AudioDevice(id: 0, uid: dest.uid, name: dest.name, transport: .airPlay))
+        }
+        return ranked(list)
+    }
+
+    public static func isAirPlayNamed(_ name: String) -> Bool {
+        let folded = name.lowercased()
+        return folded.contains("airplay") || folded.contains("homepod")
+    }
+
     /// Bluetooth and AirPlay first so the Output crown lands on AirPods / HomePods.
     public static func ranked(_ devices: [AudioDevice]) -> [AudioDevice] {
         let order: [AudioTransport] = [
@@ -101,17 +116,23 @@ public struct AudioOutputs: Sendable {
     public var current: AudioDevice? {
         let id = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
         guard id != kAudioObjectUnknown else { return nil }
+        let named = name(of: id) ?? "Output"
+        let transport = AudioTransport.from(transportType(id))
         return AudioDevice(
             id: id,
             uid: uid(of: id) ?? "id-\(id)",
-            name: name(of: id) ?? "Output",
-            transport: AudioTransport.from(transportType(id))
+            name: named,
+            transport: transport == .airPlay || Self.isAirPlayNamed(named) ? .airPlay : transport
         )
     }
 
     @discardableResult
     public func select(_ device: AudioDevice) -> Bool {
-        select(deviceID(forUID: device.uid) ?? device.id)
+        if let resolved = deviceID(forUID: device.uid) {
+            return select(resolved)
+        }
+        guard device.id != 0, device.id != kAudioObjectUnknown else { return false }
+        return select(device.id)
     }
 
     @discardableResult
@@ -119,26 +140,35 @@ public struct AudioOutputs: Sendable {
         guard id != kAudioObjectUnknown else { return false }
         let outputOK = setDefault(kAudioHardwarePropertyDefaultOutputDevice, id)
         let systemOK = setDefault(kAudioHardwarePropertyDefaultSystemOutputDevice, id)
-        return (outputOK || systemOK) && defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == id
+        let now = defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
+        if now == id { return true }
+        // AirPlay often remaps onto a sibling device after the set succeeds.
+        if outputOK || systemOK, let current, current.uid == uid(of: id) {
+            return true
+        }
+        return false
     }
 
     private func outputDevice(_ id: AudioDeviceID) -> AudioDevice? {
-        guard isAlive(id), channelCount(id, scope: kAudioDevicePropertyScopeOutput) > 0 else {
+        let transport = AudioTransport.from(transportType(id))
+        let named = name(of: id) ?? ""
+        let airPlay = transport == .airPlay || Self.isAirPlayNamed(named)
+        if !isAlive(id), !airPlay { return nil }
+        if channelCount(id, scope: kAudioDevicePropertyScopeOutput) == 0, !airPlay {
             return nil
         }
-        let transport = AudioTransport.from(transportType(id))
-        if transport == .virtual { return nil }
+        if transport == .virtual, !airPlay { return nil }
         let defaultable =
             canBeDefault(id, scope: kAudioDevicePropertyScopeOutput)
             || canBeDefaultSystem(id)
-        if !defaultable, transport != .bluetooth, transport != .airPlay {
+        if !defaultable, transport != .bluetooth, !airPlay {
             return nil
         }
         return AudioDevice(
             id: id,
             uid: uid(of: id) ?? "id-\(id)",
-            name: name(of: id) ?? "Output \(id)",
-            transport: transport
+            name: named.isEmpty ? "Output \(id)" : named,
+            transport: airPlay ? .airPlay : transport
         )
     }
 
@@ -213,6 +243,10 @@ public struct InputGain: Sendable {
     public var hasDevice: Bool {
         defaultDevice(kAudioHardwarePropertyDefaultInputDevice) != kAudioObjectUnknown
     }
+
+    /// Built-in mics often have a volume scalar. USB / virtual inputs often
+    /// do not — reading those as 0 made the Mic ring snap dead.
+    public var hasScalar: Bool { readScalar() != nil }
 
     public var deviceName: String {
         let id = defaultDevice(kAudioHardwarePropertyDefaultInputDevice)

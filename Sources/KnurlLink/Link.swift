@@ -14,6 +14,9 @@ public enum CrownAction: String, Codable, Sendable {
     case shuffle
     case `repeat`
     case pick
+    case talkStart
+    case talkEnd
+    case talkCancel
 }
 
 public struct CrownRequest: Codable, Sendable, Equatable {
@@ -69,6 +72,9 @@ public struct CrownHello: Codable, Sendable, Equatable {
     public var playlists: [String]?
     public var devices: [CrownDevice]?
     public var deviceUID: String?
+    public var destination: String?
+    public var listening: Bool?
+    public var preview: String?
 
     public init(
         host: String,
@@ -88,7 +94,10 @@ public struct CrownHello: Codable, Sendable, Equatable {
         art: String? = nil,
         playlists: [String]? = nil,
         devices: [CrownDevice]? = nil,
-        deviceUID: String? = nil
+        deviceUID: String? = nil,
+        destination: String? = nil,
+        listening: Bool? = nil,
+        preview: String? = nil
     ) {
         self.host = host
         self.mode = mode
@@ -108,6 +117,9 @@ public struct CrownHello: Codable, Sendable, Equatable {
         self.playlists = playlists
         self.devices = devices
         self.deviceUID = deviceUID
+        self.destination = destination
+        self.listening = listening
+        self.preview = preview
     }
 }
 

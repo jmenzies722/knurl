@@ -15,7 +15,14 @@ let package = Package(
     ],
     targets: [
         .target(name: "KnurlLink"),
-        .target(name: "KnurlCore"),
+        .target(
+            name: "KnurlCore",
+            linkerSettings: [
+                // KnurlCore is shared with KnurlPhone, and IOKit does not
+                // exist on iOS. The vitals file is guarded the same way.
+                .linkedFramework("IOKit", .when(platforms: [.macOS])),
+            ]
+        ),
         .target(name: "KnurlAgents"),
         .executableTarget(
             name: "Knurl",

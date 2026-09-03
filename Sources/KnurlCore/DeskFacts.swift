@@ -179,6 +179,20 @@ public enum NotchWhisper: Equatable, Sendable {
         }
     }
 
+    /// Compact leading glyph. One symbol per whisper — the Live Activity rule.
+    public var symbol: String {
+        switch self {
+        case .flow: "waveform"
+        case .timer: "timer"
+        case .attention: "exclamationmark.circle.fill"
+        case .power: "battery.100"
+        case .workspace: "rectangle.split.2x1"
+        case .music: "music.note"
+        case .session: "clock"
+        case .parked: "dial.medium"
+        }
+    }
+
     public static func pick(
         listening: Bool,
         destination: String,
