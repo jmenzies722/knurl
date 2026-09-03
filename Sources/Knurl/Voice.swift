@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 @preconcurrency import AVFoundation
 import KnurlCore
 import Observation
@@ -15,6 +16,11 @@ final class Voice {
     var languageName = Locale.current.localizedString(forIdentifier: Locale.current.identifier) ?? "System"
 
     var isActive: Bool { wantsListen || isListening }
+    /// Set the moment Cancel / Escape is hit, before any await, so Release
+    /// cannot finalize and paste a take that was already discarded.
+    private(set) var discarded = false
+    /// Desk lands the words in the remembered app. Voice only transcribes.
+    var deliver: ((String) async -> Void)?
 
     private var engine: AVAudioEngine?
     private var analyzer: SpeechAnalyzer?
@@ -29,6 +35,7 @@ final class Voice {
 
     func start(editor: NSRunningApplication?) async {
         if wantsListen { return }
+        discarded = false
         wantsListen = true
         let token = generation
         message = nil
@@ -39,6 +46,13 @@ final class Voice {
             if token == generation {
                 wantsListen = false
                 message = "Allow the microphone in Settings."
+            }
+            return
+        }
+        guard await askSpeech() else {
+            if token == generation {
+                wantsListen = false
+                message = "Allow Speech in Settings."
             }
             return
         }
@@ -64,6 +78,10 @@ final class Voice {
     }
 
     func stop() async {
+        if discarded {
+            await cancel()
+            return
+        }
         generation += 1
         let token = generation
         wantsListen = false
@@ -103,17 +121,32 @@ final class Voice {
             preview = lastTranscript
             return
         }
+        guard generation == token, !discarded else {
+            preview = lastTranscript
+            return
+        }
         lastTranscript = text
         preview = text
         levels = []
-        guard generation == token else { return }
         paste(text)
     }
 
-    func cancel() async {
+    /// Synchronous. Escape and Cancel must flip this before `endTalk` /
+    /// `stop` can run, or the hold-up pastes a discarded take.
+    func beginCancel() {
+        guard !discarded else { return }
         generation += 1
+        discarded = true
         wantsListen = false
-        guard isListening else { return }
+        message = "Discarded"
+    }
+
+    func cancel() async {
+        beginCancel()
+        guard isListening else {
+            preview = lastTranscript
+            return
+        }
         input?.finish()
         if let analyzer {
             await analyzer.cancelAndFinishNow()
@@ -269,10 +302,33 @@ final class Voice {
         engine?.stop()
     }
 
-    private func askMicrophone() async -> Bool {
-        await withCheckedContinuation { continuation in
+    /// `nonisolated` on purpose, and this is load-bearing.
+    ///
+    /// `Voice` is `@MainActor`, so without it the completion closure inherits
+    /// main-actor isolation — and macOS calls these back on its own TCC XPC
+    /// reply queue, never the main thread. Swift then inserts an executor
+    /// check that fails, which is not a nice error: it is
+    /// `_dispatch_assert_queue_fail`, an immediate SIGABRT with no message,
+    /// no stderr and no crash report. The app simply vanished the moment you
+    /// held the mic key.
+    ///
+    /// The closure touches no actor state — it resumes with a `Bool` — so
+    /// running it off the actor is both correct and necessary. The `await`
+    /// hops the caller back to the main actor afterwards.
+    nonisolated private func askMicrophone() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    /// Same reason as `askMicrophone`: `SFSpeechRecognizer` replies on a TCC
+    /// queue, and a main-actor-isolated closure there is an instant abort.
+    nonisolated private func askSpeech() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
             }
         }
     }
@@ -281,15 +337,40 @@ final class Voice {
         let board = NSPasteboard.general
         board.clearContents()
         board.setString(text, forType: .string)
-        editor?.activate()
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(90))
-            self.postPaste()
+            if let deliver {
+                await deliver(text)
+            } else {
+                self.editor?.activate()
+                try? await Task.sleep(for: .milliseconds(90))
+                self.postPaste()
+                self.message = "Copied — ⌘V if it didn’t land"
+            }
         }
-        message = "Copied — ⌘V if it didn’t land"
     }
 
-    private func postPaste() {
+    /// Whether macOS will actually deliver a synthetic ⌘V to another app.
+    ///
+    /// Posting to `.cghidEventTap` is Accessibility-gated. Without the
+    /// permission the event is dropped *silently* — the words are on the
+    /// clipboard, nothing appears in the editor, and Flow looks broken while
+    /// reporting success. That is the single worst failure this feature can
+    /// have, so it is checked rather than assumed.
+    static var canPaste: Bool { AXIsProcessTrusted() }
+
+    /// Asks for Accessibility, showing the system prompt once.
+    @discardableResult
+    static func requestPastePermission() -> Bool {
+        AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+    }
+
+    static func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func postPaste() {
         let source = CGEventSource(stateID: .hidSystemState)
         let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
         down?.flags = .maskCommand
