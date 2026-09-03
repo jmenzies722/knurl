@@ -113,6 +113,22 @@ struct HubView: View {
                 )
                 .fill(
                     LinearGradient(
+                        colors: [.white.opacity(0.035), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
+            }
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: KnurlRadius.stage,
+                    bottomLeadingRadius: KnurlRadius.stage,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 0,
+                    style: .continuous
+                )
+                .fill(
+                    LinearGradient(
                         colors: [
                             faceTint.opacity(0.10 + 0.10 * energy),
                             .clear,
@@ -124,8 +140,19 @@ struct HubView: View {
                 .animation(.easeInOut(duration: 0.9), value: state.control)
             }
             .overlay(alignment: .leading) {
-                Rectangle().fill(KnurlPalette.hairline).frame(width: 1)
+                // A lit edge where the stage meets the rail, so the page reads
+                // as sitting on top of the chrome rather than beside it.
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [KnurlPalette.hairlineStrong, KnurlPalette.hairline],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 1)
             }
+            .shadow(color: .black.opacity(0.45), radius: 22, x: -6)
         }
         .clipShape(
             UnevenRoundedRectangle(

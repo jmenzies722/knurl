@@ -62,10 +62,15 @@ public enum NotchStage: String, Sendable, CaseIterable {
     }
 
     /// The concave fillet where the shape leaves the housing.
+    /// The concave fillet where the shape leaves the cutout.
+    ///
+    /// Matched to the cutout's own bottom corner radius on the 14- and
+    /// 16-inch machines. Too small and the flare looks cut into the bezel;
+    /// too large and it detaches from it.
     public var topCornerRadius: CGFloat {
         switch self {
         case .rest, .glance: 0
-        case .hover, .shelf, .flow: 12
+        case .hover, .shelf, .flow: 11
         }
     }
 
@@ -95,20 +100,31 @@ public enum NotchMath: Sendable {
     /// `auxiliaryTopLeftArea` and `auxiliaryTopRightArea` are the menu-bar
     /// strips either side of the cutout, so the gap between them is the notch.
     /// This is the supported way to ask; SkyLight is not.
+    /// - Parameter safeAreaTop: `NSScreen.safeAreaInsets.top`, which is the
+    ///   height of the cutout itself.
+    ///
+    /// The cutout and the menu bar are **not** the same height. On a 16-inch
+    /// MacBook Pro the safe-area inset is 38 points and the menu bar is 39, so
+    /// deriving the housing from the menu bar put the shape one point lower
+    /// than the notch — a black hairline sticking out below the bezel across
+    /// all 220 points of it, which is exactly the thing that stops it looking
+    /// flush. Measure the cutout, not the strip beside it.
     public static func housingFrame(
         screen: CGRect,
         visible: CGRect,
         leftAux: CGRect?,
-        rightAux: CGRect?
+        rightAux: CGRect?,
+        safeAreaTop: CGFloat = 0
     ) -> CGRect? {
         guard let left = leftAux, let right = rightAux, right.minX > left.maxX + 24 else {
             return nil
         }
-        let height = screen.maxY - visible.maxY
+        let menuBar = screen.maxY - visible.maxY
+        let height = safeAreaTop > 10 ? safeAreaTop : menuBar
         guard height > 10 else { return nil }
         return CGRect(
             x: left.maxX,
-            y: visible.maxY,
+            y: screen.maxY - height,
             width: right.minX - left.maxX,
             height: height
         )

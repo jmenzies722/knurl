@@ -22,11 +22,11 @@ public enum KnurlPalette {
     /// The field the Hub sits on.
     public static let void = dynamic(dark: hex(0x18181B), light: hex(0xF2F2F7))
     /// The stage behind the content column.
-    public static let stage = dynamic(dark: hex(0x1F1F23), light: hex(0xFBFBFD))
+    public static let stage = dynamic(dark: hex(0x161619), light: hex(0xF7F7FA))
     /// A card resting on the stage.
-    public static let card = dynamic(dark: hex(0x2A2A2F), light: hex(0xFFFFFF))
+    public static let card = dynamic(dark: hex(0x24242A), light: hex(0xFFFFFF))
     /// A card that is lifted — hovered, selected, live.
-    public static let raised = dynamic(dark: hex(0x35353B), light: hex(0xFFFFFF))
+    public static let raised = dynamic(dark: hex(0x303037), light: hex(0xFFFFFF))
     /// A well the eye reads as cut into the surface.
     public static let sunken = dynamic(dark: hex(0x141417), light: hex(0xEDEDF2))
     /// The fill under a chip or an unselected button. Distinct from `raised`
@@ -40,7 +40,7 @@ public enum KnurlPalette {
     public static let hairline = dynamicAlpha(dark: (0xFFFFFF, 0.10), light: (0x1D1D1F, 0.10))
     public static let hairlineStrong = dynamicAlpha(dark: (0xFFFFFF, 0.22), light: (0x1D1D1F, 0.18))
     /// The specular line along the top edge of a raised surface.
-    public static let sheen = dynamicAlpha(dark: (0xFFFFFF, 0.12), light: (0xFFFFFF, 1.0))
+    public static let sheen = dynamicAlpha(dark: (0xFFFFFF, 0.16), light: (0xFFFFFF, 1.0))
 
     // Apple's text greys. #1D1D1F is the one Apple uses for body copy; the
     // secondary and tertiary steps are close to `secondaryLabelColor`.
@@ -129,7 +129,7 @@ public enum KnurlSpace {
     public static let snug: CGFloat = 10
     public static let step: CGFloat = 14
     public static let room: CGFloat = 20
-    public static let hall: CGFloat = 30
+    public static let hall: CGFloat = 34
     public static let stage: CGFloat = 40
 }
 
@@ -270,9 +270,20 @@ public enum KnurlLevel {
 
     public var shadow: (Color, CGFloat, CGFloat) {
         switch self {
-        case .card: (.black.opacity(0.10), 10, 3)
-        case .raised: (.black.opacity(0.16), 20, 7)
+        case .card: (.black.opacity(0.26), 18, 7)
+        case .raised: (.black.opacity(0.38), 30, 13)
         case .sunken: (.clear, 0, 0)
+        }
+    }
+
+    /// How much lighter the top of the surface is than the bottom. This is
+    /// the whole difference between a panel and a rectangle: a real surface
+    /// is lit from above, so it cannot be one flat value.
+    public var lift: Double {
+        switch self {
+        case .card: 0.055
+        case .raised: 0.085
+        case .sunken: -0.03
         }
     }
 }
@@ -307,6 +318,19 @@ public struct KnurlSurface: ViewModifier {
             .background {
                 ZStack {
                     shape.fill(level.fill)
+                    // Top-lit, always. Flat fills are what made the Hub read
+                    // as a diagram of an app rather than an app.
+                    shape.fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(max(0, level.lift)),
+                                .clear,
+                                .black.opacity(max(0, -level.lift) + 0.05),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                     if let tint {
                         shape.fill(
                             LinearGradient(
@@ -323,11 +347,11 @@ public struct KnurlSurface: ViewModifier {
                 shape.strokeBorder(
                     LinearGradient(
                         colors: [
-                            (tint ?? KnurlPalette.hairlineStrong).opacity(tint == nil ? 1 : 0.55),
-                            KnurlPalette.hairline,
+                            (tint ?? KnurlPalette.hairlineStrong).opacity(tint == nil ? 1 : 0.65),
+                            KnurlPalette.hairline.opacity(0.4),
                         ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        startPoint: .top,
+                        endPoint: .bottom
                     ),
                     lineWidth: 1
                 )

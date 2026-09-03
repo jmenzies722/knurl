@@ -202,7 +202,8 @@ final class NotchPanel {
             screen: screen.frame,
             visible: screen.visibleFrame,
             leftAux: screen.auxiliaryTopLeftArea,
-            rightAux: screen.auxiliaryTopRightArea
+            rightAux: screen.auxiliaryTopRightArea,
+            safeAreaTop: screen.safeAreaInsets.top
         )
     }
 
@@ -212,7 +213,8 @@ final class NotchPanel {
                 screen: $0.frame,
                 visible: $0.visibleFrame,
                 leftAux: $0.auxiliaryTopLeftArea,
-                rightAux: $0.auxiliaryTopRightArea
+                rightAux: $0.auxiliaryTopRightArea,
+                safeAreaTop: $0.safeAreaInsets.top
             ) != nil
         }
     }

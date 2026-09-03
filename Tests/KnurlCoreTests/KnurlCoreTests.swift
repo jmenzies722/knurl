@@ -542,14 +542,36 @@ struct NotchStageTests {
             screen: screen,
             visible: visible,
             leftAux: CGRect(x: 0, y: 1291, width: 918, height: 38),
-            rightAux: CGRect(x: 1138, y: 1291, width: 918, height: 38)
+            rightAux: CGRect(x: 1138, y: 1291, width: 918, height: 38),
+            safeAreaTop: 38
         )!
+    }
+
+    /// The cutout is 38 points tall on this hardware and the menu bar is 39.
+    /// Deriving the housing from the menu bar hangs the shape one point below
+    /// the bezel, right across the notch — a black ledge, and the single
+    /// reason it stopped looking flush.
+    @Test func theHousingIsTheCutoutNotTheMenuBar() {
+        #expect(housing.height == 38)
+        #expect(housing.maxY == screen.maxY)
+        #expect(housing.minY == 1291)
+
+        // With no safe-area inset reported, fall back to the menu bar rather
+        // than returning nothing.
+        let fallback = NotchMath.housingFrame(
+            screen: screen,
+            visible: visible,
+            leftAux: CGRect(x: 0, y: 1291, width: 918, height: 38),
+            rightAux: CGRect(x: 1138, y: 1291, width: 918, height: 38)
+        )
+        #expect(fallback?.height == 39)
     }
 
     @Test func housingMatchesTheMeasuredCutout() {
         #expect(housing.width == 220)
         #expect(housing.minX == 918)
         #expect(housing.maxY == screen.maxY)
+        #expect(housing.height == 38)
     }
 
     @Test func panelIsTopAnchoredAndCentredOnTheCutout() {
