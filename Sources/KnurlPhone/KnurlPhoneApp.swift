@@ -7,7 +7,6 @@ struct KnurlPhoneApp: App {
     var body: some Scene {
         WindowGroup {
             CrownView(session: session)
-                .preferredColorScheme(.dark)
         }
     }
 }

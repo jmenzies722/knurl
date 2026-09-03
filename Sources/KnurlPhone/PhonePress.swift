@@ -30,3 +30,34 @@ private struct ImmediatePressLabel: View {
             )
     }
 }
+
+struct PhoneHold<Label: View>: View {
+    var down: () -> Void
+    var up: () -> Void
+    @ViewBuilder var label: () -> Label
+
+    @State private var held = false
+
+    var body: some View {
+        label()
+            .scaleEffect(held ? 0.96 : 1)
+            .opacity(held ? 0.88 : 1)
+            .animation(.snappy(duration: 0.16), value: held)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !held {
+                            held = true
+                            down()
+                        }
+                    }
+                    .onEnded { _ in
+                        guard held else { return }
+                        held = false
+                        up()
+                    }
+            )
+            .accessibilityAddTraits(.isButton)
+    }
+}

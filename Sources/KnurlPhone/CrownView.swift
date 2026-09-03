@@ -1,239 +1,493 @@
 import KnurlCore
 import KnurlLink
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#endif
-#if canImport(AppKit)
-import AppKit
-#endif
 
 struct CrownView: View {
     @Bindable var session: PhoneSession
     @Namespace private var faces
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
-            PhoneAtmosphere(mode: session.currentMode, reduceMotion: reduceMotion)
+            KnurlAtmosphere(
+                tint: phoneTint(
+                    mode: session.currentMode,
+                    progress: session.hello?.progress ?? 0.5,
+                    muted: session.hello?.muted == true
+                ),
+                energy: energy,
+                lively: !reduceMotion
+            )
             if session.isConnected {
-                connected
+                room
             } else {
                 looking
             }
         }
-        .preferredColorScheme(.dark)
+        // Nothing animates while the app is in the background. On the Mac
+        // remote this matters as much as on the phone: a window behind your
+        // editor was still driving a twelve-frame-a-second crown.
+        .environment(\.knurlOnScreen, scenePhase == .active)
         .sensoryFeedback(.selection, trigger: session.detentTick)
         .sensoryFeedback(.selection, trigger: session.faceTick)
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.7), trigger: session.confirmTick)
+        .animation(PhoneMotion.spring(reduceMotion: reduceMotion), value: session.face)
+        .animation(PhoneMotion.spring(reduceMotion: reduceMotion), value: session.isListening)
         .onAppear { session.start() }
     }
 
-    private var connected: some View {
-        VStack(spacing: 16) {
-            statusPill
-            if session.currentMode == .media {
-                mediaHeader
+    /// How lit the room is. Same rule as the Mac: something actually
+    /// happening makes the field glow, so the phone in your hand and the Hub
+    /// on the desk are never telling you different stories.
+    private var energy: Double {
+        var value = 0.20
+        if session.hello?.playing == true { value += 0.30 }
+        if session.isListening { value += 0.35 }
+        return min(1, value)
+    }
+
+    private var room: some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            PhoneHallHeader(title: session.currentMode.title, whisper: whisper) {
+                flowHold
             }
-            Spacer(minLength: 0)
-            PhoneCrown(session: session)
-            if session.currentMode == .media {
-                TransportBar(session: session)
-                if let playlists = session.hello?.playlists, !playlists.isEmpty {
+            .padding(.horizontal, KnurlSpace.room)
+            .padding(.top, KnurlSpace.snug)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: KnurlSpace.room) {
+                    PhoneCrown(session: session)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, KnurlSpace.tight)
+                    Text(session.currentMode.hint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(KnurlPalette.inkFaint)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .fixedSize(horizontal: false, vertical: true)
+                    stage
+                }
+                .padding(.horizontal, KnurlSpace.room)
+                .padding(.bottom, KnurlSpace.room)
+            }
+            .scrollIndicators(.never)
+
+            faceChips
+                .padding(.horizontal, KnurlSpace.step)
+                .padding(.bottom, KnurlSpace.tight)
+        }
+    }
+
+    private var whisper: String {
+        let host = session.hello?.host ?? session.connectedName ?? "Mac"
+        if session.isListening {
+            return "Flow → \(session.destination)"
+        }
+        return "\(host) · \(session.wordsLand)"
+    }
+
+    private var flowHold: some View {
+        HStack(spacing: KnurlSpace.tight) {
+            if session.isListening {
+                PhoneChip(title: "Cancel", symbol: "xmark", tint: KnurlPalette.alert) {
+                    session.cancelTalk()
+                }
+                .accessibilityLabel("Cancel Flow")
+            }
+            PhoneHold(
+                down: { session.beginTalk() },
+                up: { session.endTalk() }
+            ) {
+                HStack(spacing: KnurlSpace.tight) {
+                    Image(systemName: session.isListening ? "waveform" : "mic.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .symbolEffect(
+                            .variableColor.iterative,
+                            isActive: session.isListening && !reduceMotion
+                        )
+                    Text(session.isListening ? "Release" : "Hold")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(session.isListening ? .white : KnurlPalette.ink)
+                .padding(.horizontal, KnurlSpace.step)
+                .frame(height: 38)
+                .background {
+                    Capsule().fill(
+                        session.isListening
+                            ? KnurlPalette.live
+                            : KnurlPalette.control
+                    )
+                }
+                .overlay {
+                    Capsule().strokeBorder(
+                        session.isListening ? .clear : KnurlPalette.hairline,
+                        lineWidth: 1
+                    )
+                }
+                .shadow(
+                    color: session.isListening ? KnurlPalette.live.opacity(0.5) : .clear,
+                    radius: 14,
+                    y: 3
+                )
+            }
+            .accessibilityLabel(session.isListening ? "Release to paste" : "Hold to talk")
+            .accessibilityHint(session.wordsLand)
+        }
+    }
+
+    @ViewBuilder
+    private var stage: some View {
+        switch session.currentMode {
+        case .media:
+            mediaStage
+        case .output:
+            outputStage
+        case .mic:
+            micStage
+        case .volume, .brightness:
+            EmptyView()
+        }
+    }
+
+    private var mediaStage: some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            TransportBar(session: session)
+            PhoneSection(title: "Track") {
+                VStack(spacing: 0) {
+                    PhoneFact(label: "Track", value: session.hello?.title ?? "Music")
+            if let artist = session.hello?.target, !artist.isEmpty {
+                PhoneFact(label: "Artist", value: artist)
+            }
+            if let album = session.hello?.album, !album.isEmpty {
+                PhoneFact(label: "Album", value: album)
+            }
+            if let genre = session.hello?.genre, !genre.isEmpty {
+                PhoneFact(label: "Genre", value: genre)
+            }
+                }
+                .padding(KnurlSpace.step)
+                .knurlSurface()
+            }
+            if let playlists = session.hello?.playlists, !playlists.isEmpty {
+                PhoneSection(title: "Playlist", accessory: "\(playlists.count)") {
                     ChipScroller(items: playlists.map { ($0, $0, false) }) { session.pick($0) }
                 }
-            } else if let devices = session.hello?.devices, !devices.isEmpty {
-                ChipScroller(
-                    items: devices.map { ($0.id, $0.name, $0.id == session.hello?.deviceUID) }
-                ) { session.pick($0) }
-                if session.currentMode == .output {
-                    Button("Swap") { session.confirm() }
-                        .buttonStyle(.glass)
+            }
+        }
+    }
+
+    private var outputStage: some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            if let devices = session.hello?.devices, !devices.isEmpty {
+                PhoneSection(title: "Speakers", accessory: "\(devices.count)") {
+                    VStack(spacing: 3) {
+                        ForEach(devices) { device in
+                            PhoneDeviceRow(
+                                name: device.name,
+                                detail: device.kind,
+                                selected: device.id == session.hello?.deviceUID
+                            ) {
+                                session.pick(device.id)
+                            }
+                        }
+                    }
                 }
             }
-            if session.currentMode == .mic {
-                Text("Talk stays on the Mac.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            PhoneChip(
+                title: "Swap",
+                symbol: "arrow.triangle.2.circlepath",
+                tint: phoneTint(mode: .output, progress: 0.5, muted: false),
+                selected: true
+            ) {
+                session.confirm()
             }
-            Spacer(minLength: 0)
-            faceChips
+            .accessibilityLabel("Swap speakers")
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 14)
     }
 
-    private var mediaHeader: some View {
-        VStack(spacing: 4) {
-            Text(session.hello?.title ?? "Music")
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-            Text(session.hello?.target ?? "")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            let detail = [session.hello?.album, session.hello?.genre].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-            if !detail.isEmpty {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+    private var micStage: some View {
+        VStack(alignment: .leading, spacing: KnurlSpace.step) {
+            PhoneSection(title: "Flow") {
+                VStack(alignment: .leading, spacing: KnurlSpace.tight) {
+                    HStack(spacing: KnurlSpace.tight) {
+                        KnurlPip(
+                            tint: KnurlPalette.live,
+                            live: session.isListening,
+                            lively: !reduceMotion,
+                            size: 7
+                        )
+                        Text(session.wordsLand)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(KnurlPalette.ink)
+                    }
+                    Text(talkStatus)
+                        .font(.system(size: 12))
+                        .foregroundStyle(KnurlPalette.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(KnurlSpace.step)
+                .knurlSurface(
+                    session.isListening ? .raised : .card,
+                    tint: session.isListening ? KnurlPalette.live : nil,
+                    glow: session.isListening ? 0.4 : 0
+                )
+            }
+            if let devices = session.hello?.devices, !devices.isEmpty {
+                PhoneSection(title: "Input", accessory: "\(devices.count)") {
+                    VStack(spacing: 3) {
+                        ForEach(devices) { device in
+                            PhoneDeviceRow(
+                                name: device.name,
+                                detail: device.kind,
+                                selected: device.id == session.hello?.deviceUID
+                            ) {
+                                session.pick(device.id)
+                            }
+                        }
+                    }
+                }
             }
         }
-        .padding(.horizontal, 8)
     }
 
-    private var statusPill: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color(red: 0.32, green: 0.92, blue: 0.58))
-                .frame(width: 7, height: 7)
-            Text(session.hello?.host ?? session.connectedName ?? "Knurl")
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+    private var talkStatus: String {
+        if session.isListening {
+            return session.hello?.preview?.isEmpty == false ? (session.hello?.preview ?? "Listening…") : "Listening…"
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        if let preview = session.hello?.preview, !preview.isEmpty {
+            return preview
+        }
+        return "Hold, speak, release. Speech stays on the Mac."
     }
 
     private var looking: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: KnurlSpace.room) {
             Spacer()
-            VStack(spacing: 16) {
-                ProgressView().controlSize(.large)
-                Text(emptyTitle).font(.headline)
-                Text(session.lastError ?? "Open Knurl on this Mac. Allow Local Network if this stays empty.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            ZStack {
+                Circle()
+                    .fill(KnurlPalette.calm)
+                    .blur(radius: 40)
+                    .opacity(session.lastError == nil ? 0.30 : 0.10)
+                    .frame(width: 160, height: 160)
+                Circle()
+                    .strokeBorder(KnurlPalette.hairline, lineWidth: 1)
+                    .frame(width: 128, height: 128)
+                Image("KnurlMark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 84, height: 84)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .accessibilityHidden(true)
+            }
+            .frame(height: 160)
+
+            VStack(spacing: KnurlSpace.tight) {
+                Text(emptyTitle)
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .foregroundStyle(KnurlPalette.ink)
                     .multilineTextAlignment(.center)
-                if session.macs.count > 1 {
+                Text(emptyDetail)
+                    .font(.system(size: 14))
+                    .foregroundStyle(KnurlPalette.inkSoft)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if session.macs.count > 1 {
+                VStack(spacing: KnurlSpace.tight) {
                     ForEach(session.macs) { mac in
-                        Button(mac.name) { session.connect(mac) }
-                            .buttonStyle(.glassProminent)
+                        Button {
+                            session.connect(mac)
+                        } label: {
+                            HStack(spacing: KnurlSpace.snug) {
+                                Image(systemName: "laptopcomputer")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(KnurlPalette.calm)
+                                Text(mac.name)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(KnurlPalette.ink)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(KnurlPalette.inkFaint)
+                            }
+                            .padding(.horizontal, KnurlSpace.step)
+                            .frame(height: 52)
+                            .frame(maxWidth: .infinity)
+                            .knurlSurface()
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(ImmediatePressStyle())
                     }
                 }
-                Button("Look Again") { session.refresh() }
-                    .buttonStyle(.glass)
+                .frame(maxWidth: 340)
             }
-            .padding(28)
-            .frame(maxWidth: 360)
-            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+            PhoneChip(
+                title: "Look again",
+                symbol: "arrow.clockwise",
+                tint: KnurlPalette.calm
+            ) {
+                session.refresh()
+            }
             Spacer()
         }
-        .padding(24)
+        .padding(KnurlSpace.hall)
     }
 
     private var emptyTitle: String {
         if session.lastError != nil { return "Couldn’t reach the Mac desk." }
         if session.macs.isEmpty { return "Looking for the Mac desk…" }
+        if session.macs.count > 1 { return "Which Mac?" }
         return "Connecting…"
     }
 
+    private var emptyDetail: String {
+        session.lastError
+            ?? "Open Knurl on this Mac. Allow Local Network if this stays empty."
+    }
+
     private var faceChips: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 6) {
-                ForEach(DialMode.allCases) { mode in
-                    let selected = session.face == mode.rawValue
-                    Button {
-                        session.select(mode.rawValue)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: chipSymbol(mode))
-                                .font(.body.weight(.semibold))
-                                .symbolRenderingMode(.hierarchical)
-                                .symbolEffect(.bounce, value: reduceMotion ? 0 : (selected ? session.faceTick : 0))
-                            Text(mode.title)
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(ImmediatePressStyle())
-                    .foregroundStyle(tint(for: mode, muted: chipMuted(mode)))
-                    .glassEffect(
-                        selected
-                            ? .regular.tint(tint(for: mode, muted: chipMuted(mode)).opacity(0.55)).interactive()
-                            : .regular.interactive(),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    )
-                    .modifier(SelectedChipGlass(active: selected && !reduceMotion, namespace: faces))
-                    .accessibilityLabel(mode.title)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
+        HStack(spacing: KnurlSpace.tight) {
+            ForEach(Array(DialMode.allCases.enumerated()), id: \.element.id) { index, mode in
+                faceChip(mode, number: index + 1)
             }
         }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func faceChip(_ mode: DialMode, number: Int) -> some View {
+        let selected = session.face == mode.rawValue
+        let tint = phoneTint(
+            mode: mode,
+            progress: session.hello?.progress ?? 0.5,
+            muted: chipMuted(mode)
+        )
+        return Button {
+            if selected {
+                session.confirm()
+            } else {
+                session.select(mode.rawValue)
+            }
+        } label: {
+            VStack(spacing: 5) {
+                Image(systemName: chipSymbol(mode))
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(selected ? .white : tint)
+                    .symbolEffect(.bounce, value: reduceMotion ? 0 : (selected ? session.faceTick : 0))
+                    .symbolEffectsRemoved(reduceMotion)
+                Text(mode.title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(selected ? .white : KnurlPalette.inkFaint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                // Each key carries its own level, so the strip says where
+                // every face is sitting without being tapped.
+                KnurlMeter(
+                    progress: selected ? (session.hello?.progress ?? 0.5) : 0,
+                    tint: selected ? .white.opacity(0.85) : tint.opacity(0.5),
+                    height: 2.5,
+                    showsTrack: false
+                )
+                .padding(.horizontal, 8)
+                .opacity(selected ? 1 : 0.6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 62)
+            .background {
+                RoundedRectangle(cornerRadius: KnurlRadius.chip + 3, style: .continuous)
+                    .fill(selected ? tint : KnurlPalette.control)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: KnurlRadius.chip + 3, style: .continuous)
+                    .strokeBorder(selected ? .clear : KnurlPalette.hairline, lineWidth: 1)
+            }
+            .shadow(color: selected ? tint.opacity(0.45) : .clear, radius: 12, y: 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ImmediatePressStyle())
+        .accessibilityLabel(mode.title)
+        .accessibilityValue("Key \(number)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(selected ? mode.confirmTitle : "Switch face")
     }
 
     private func chipSymbol(_ mode: DialMode) -> String {
         switch mode {
-        case .volume: (session.hello?.muted == true && session.face == "volume") ? "speaker.slash.fill" : mode.symbol
-        case .mic: (session.hello?.muted == true && session.face == "mic") ? "mic.slash.fill" : mode.symbol
-        case .media: session.hello?.playing == true ? "pause.fill" : "play.fill"
-        default: mode.symbol
+        case .volume:
+            (session.hello?.muted == true && session.face == "volume") ? "speaker.slash.fill" : mode.symbol
+        case .mic:
+            session.isListening
+                ? "waveform"
+                : ((session.hello?.muted == true && session.face == "mic") ? "mic.slash.fill" : mode.symbol)
+        case .media:
+            session.hello?.playing == true ? "pause.fill" : "play.fill"
+        case .brightness, .output:
+            mode.symbol
         }
     }
 
     private func chipMuted(_ mode: DialMode) -> Bool {
         session.hello?.muted == true && session.face == mode.rawValue
     }
-
-    private func tint(for mode: DialMode, muted: Bool) -> Color {
-        let rgb = DialTint.rgb(progress: session.hello?.progress ?? 0.5, muted: muted, mode: mode)
-        return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
-    }
-}
-
-private struct SelectedChipGlass: ViewModifier {
-    var active: Bool
-    var namespace: Namespace.ID
-
-    func body(content: Content) -> some View {
-        if active {
-            content.glassEffectID("face", in: namespace)
-        } else {
-            content
-        }
-    }
 }
 
 private struct TransportBar: View {
     @Bindable var session: PhoneSession
 
+    private var tint: Color { phoneTint(mode: .media, progress: 0.6, muted: false) }
+
     var body: some View {
-        HStack(spacing: 10) {
-            glassIcon("shuffle", on: session.hello?.shuffle == true) { session.shuffle() }
-            glassIcon("backward.fill", on: false) { session.skip(-1) }
+        HStack(spacing: KnurlSpace.tight) {
+            icon("shuffle", on: session.hello?.shuffle == true) { session.shuffle() }
+                .accessibilityLabel("Shuffle")
+            icon("backward.fill", on: false) { session.skip(-1) }
+                .accessibilityLabel("Previous")
             Button {
                 session.confirm()
             } label: {
                 Image(systemName: session.hello?.playing == true ? "pause.fill" : "play.fill")
-                    .font(.title3.weight(.semibold))
-                    .frame(width: 72, height: 48)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 76, height: 44)
+                    .background { Capsule().fill(tint) }
+                    .shadow(color: tint.opacity(0.5), radius: 14, y: 3)
+                    .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(ImmediatePressStyle())
-            .glassEffect(.regular.tint(Color(red: 0.96, green: 0.40, blue: 0.52).opacity(0.45)).interactive(), in: Capsule())
-            glassIcon("forward.fill", on: false) { session.skip(1) }
-            glassIcon(session.hello?.repeat == "one" ? "repeat.1" : "repeat", on: session.hello?.repeat != "off" && session.hello?.repeat != nil) {
+            .accessibilityLabel(session.hello?.playing == true ? "Pause" : "Play")
+            icon("forward.fill", on: false) { session.skip(1) }
+                .accessibilityLabel("Next")
+            icon(
+                session.hello?.repeat == "one" ? "repeat.1" : "repeat",
+                on: session.hello?.repeat != "off" && session.hello?.repeat != nil
+            ) {
                 session.cycleRepeat()
             }
+            .accessibilityLabel("Repeat")
         }
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
     }
 
-    private func glassIcon(_ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
+    private func icon(_ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.body.weight(.semibold))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(on ? tint : KnurlPalette.inkSoft)
                 .frame(width: 44, height: 44)
+                .background { Circle().fill(KnurlPalette.control) }
+                .overlay {
+                    Circle().strokeBorder(
+                        on ? tint.opacity(0.7) : KnurlPalette.hairline,
+                        lineWidth: 1
+                    )
+                }
         }
         .buttonStyle(ImmediatePressStyle())
-        .glassEffect(
-            on ? .regular.tint(.white.opacity(0.28)).interactive() : .regular.interactive(),
-            in: Circle()
-        )
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -243,287 +497,19 @@ private struct ChipScroller: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: KnurlSpace.tight) {
                 ForEach(items, id: \.id) { item in
-                    Button(item.title) { pick(item.id) }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .buttonStyle(ImmediatePressStyle())
-                        .glassEffect(
-                            item.selected
-                                ? .regular.tint(.white.opacity(0.28)).interactive()
-                                : .regular.interactive(),
-                            in: Capsule()
-                        )
-                }
-            }
-            .scrollTargetLayout()
-        }
-        .scrollTargetBehavior(.viewAligned)
-        .scrollBounceBehavior(.always)
-    }
-}
-
-private struct PhoneCrown: View {
-    @Bindable var session: PhoneSession
-    @State private var lastAngle: Double?
-    @State private var stepBank = 0.0
-    @State private var localProgress: Double?
-
-    private let size: CGFloat = 252
-
-    var body: some View {
-        let mode = session.currentMode
-        let muted = session.hello?.muted == true
-        TimelineView(.periodic(from: .now, by: 0.2)) { timeline in
-            let progress = liveProgress(at: timeline.date)
-            let rgb = DialTint.rgb(progress: progress, muted: muted, mode: mode)
-            let tint = Color(red: rgb.0, green: rgb.1, blue: rgb.2)
-            ZStack {
-                well(tint: tint, mode: mode)
-                arc(progress: progress, tint: tint, playing: session.hello?.playing == true)
-                if mode != .media {
-                    VStack(spacing: 8) {
-                        Image(systemName: crownSymbol(mode, muted: muted))
-                            .font(.system(size: 28, weight: .semibold))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(tint)
-                            .contentTransition(.symbolEffect(.replace))
-                        Text(session.hello?.readout ?? mode.title)
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .glassEffect(.regular.tint(.black.opacity(0.35)), in: Capsule())
-                            .contentTransition(.numericText())
+                    PhoneChip(
+                        title: item.title,
+                        tint: phoneTint(mode: .media, progress: 0.6, muted: false),
+                        selected: item.selected
+                    ) {
+                        pick(item.id)
                     }
-                } else {
-                    VStack {
-                        Spacer()
-                        Text(capsuleText(progress: progress))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .glassEffect(.regular.tint(.black.opacity(0.4)), in: Capsule())
-                            .padding(.bottom, 28)
-                    }
-                    .frame(width: 168, height: 168)
-                    .allowsHitTesting(false)
-                }
-                Button {
-                    session.confirm()
-                } label: {
-                    Color.clear.frame(width: 120, height: 120)
-                }
-                .buttonStyle(ImmediatePressStyle())
-                .accessibilityLabel(mode.confirmTitle)
-            }
-            .frame(width: size, height: size)
-            .glassEffect(.regular.tint(tint.opacity(0.2)).interactive(), in: Circle())
-            .contentShape(Circle())
-            .gesture(drag)
-            .animation(session.dragging ? nil : .snappy(duration: 0.16), value: session.hello?.readout)
-            .animation(.snappy(duration: 0.18), value: session.face)
-            .accessibilityValue(session.hello?.readout ?? "")
-        }
-    }
-
-    private func liveProgress(at date: Date) -> Double {
-        if session.dragging, let localProgress { return localProgress }
-        let fallback = DialMath.clampVolume(session.hello?.progress ?? 0.12)
-        if session.hello?.playing == true, let duration = session.hello?.duration, duration > 1 {
-            let elapsed = fallback * duration + date.timeIntervalSince(session.helloAt)
-            return DialMath.clampVolume(elapsed / duration)
-        }
-        return fallback
-    }
-
-    private func capsuleText(progress: Double) -> String {
-        if let duration = session.hello?.duration, duration > 1 {
-            let elapsed = progress * duration
-            return "\(DialMath.clock(elapsed))  −\(DialMath.clock(max(0, duration - elapsed)))"
-        }
-        return session.hello?.readout ?? "Music"
-    }
-
-    private func crownSymbol(_ mode: DialMode, muted: Bool) -> String {
-        switch mode {
-        case .volume: muted ? "speaker.slash.fill" : "speaker.wave.2.fill"
-        case .mic: muted ? "mic.slash.fill" : "mic.fill"
-        default: mode.symbol
-        }
-    }
-
-    private func well(tint: Color, mode: DialMode) -> some View {
-        ZStack {
-            Circle().fill(.black.opacity(0.28))
-            if mode == .media, let data = session.art, let image = CoverImage.make(data) {
-                image
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 168, height: 168)
-                    .clipShape(Circle())
-            } else {
-                MeshGradient(
-                    width: 3,
-                    height: 3,
-                    points: [
-                        .init(0, 0), .init(0.5, 0), .init(1, 0),
-                        .init(0, 0.5), .init(0.5, 0.5), .init(1, 0.5),
-                        .init(0, 1), .init(0.5, 1), .init(1, 1),
-                    ],
-                    colors: [
-                        tint.opacity(0.55), .clear, Color(red: 1.0, green: 0.78, blue: 0.32).opacity(0.28),
-                        .clear, tint.opacity(0.16), .clear,
-                        Color(red: 0.98, green: 0.55, blue: 0.42).opacity(0.2),
-                        .clear,
-                        Color(red: 0.42, green: 0.86, blue: 0.78).opacity(0.26),
-                    ]
-                )
-                .clipShape(Circle())
-            }
-            Circle()
-                .trim(from: 0, to: 0.75)
-                .stroke(.white.opacity(0.12), style: StrokeStyle(lineWidth: 11, lineCap: .round))
-                .padding(16)
-                .rotationEffect(.degrees(135))
-            ForEach(0..<11, id: \.self) { index in
-                Capsule()
-                    .fill(.white.opacity(index % 5 == 0 ? 0.34 : 0.12))
-                    .frame(width: 1.6, height: index % 5 == 0 ? 9 : 4)
-                    .offset(y: -92)
-                    .rotationEffect(.degrees(135 + Double(index) / 10 * 270))
-            }
-        }
-    }
-
-    private func arc(progress: Double, tint: Color, playing: Bool) -> some View {
-        ZStack {
-            Circle()
-                .trim(from: 0, to: 0.75 * max(progress, 0.02))
-                .stroke(
-                    AngularGradient(
-                        colors: [Color(red: 0.45, green: 0.50, blue: 0.86), tint],
-                        center: .center,
-                        startAngle: .degrees(135),
-                        endAngle: .degrees(135 + 270 * max(progress, 0.001))
-                    ),
-                    style: StrokeStyle(lineWidth: 11, lineCap: .round)
-                )
-                .padding(16)
-                .rotationEffect(.degrees(135))
-                .shadow(color: tint.opacity(playing ? 0.55 : 0.22), radius: playing ? 12 : 5)
-            Capsule()
-                .fill(.white)
-                .frame(width: 5, height: 22)
-                .offset(y: -92)
-                .rotationEffect(.degrees(DialMath.ringAngle(progress: progress)))
-        }
-        .allowsHitTesting(false)
-    }
-
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                if !session.dragging {
-                    session.dragging = true
-                    stepBank = Double(TickSound.detent(from: session.hello?.progress ?? 0.5))
-                }
-                let mode = session.currentMode
-                if mode == .output {
-                    let angle = atan2(value.location.y - size / 2, value.location.x - size / 2)
-                    if let lastAngle {
-                        var delta = angle - lastAngle
-                        if delta > Double.pi { delta -= 2 * Double.pi }
-                        if delta < -Double.pi { delta += 2 * Double.pi }
-                        stepBank += delta
-                        let step = Double.pi / 10
-                        while stepBank > step {
-                            stepBank -= step
-                            session.rotate(1)
-                        }
-                        while stepBank < -step {
-                            stepBank += step
-                            session.rotate(-1)
-                        }
-                    }
-                    lastAngle = angle
-                    return
-                }
-                let dx = value.location.x - size / 2
-                let dy = value.location.y - size / 2
-                let degrees = atan2(dx, -dy) * 180 / .pi
-                guard let next = DialMath.ringProgress(clockwiseFromNoon: degrees) else { return }
-                localProgress = next
-                session.setProgress(next)
-                let detent = TickSound.detent(from: next)
-                if detent != Int(stepBank) {
-                    stepBank = Double(detent)
-                    session.tickDetent()
                 }
             }
-            .onEnded { _ in
-                session.dragging = false
-                lastAngle = nil
-                stepBank = 0
-                localProgress = nil
-            }
-    }
-}
-
-private enum CoverImage {
-    static func make(_ data: Data) -> Image? {
-        #if canImport(UIKit)
-        guard let image = UIImage(data: data) else { return nil }
-        return Image(uiImage: image)
-        #elseif canImport(AppKit)
-        guard let image = NSImage(data: data) else { return nil }
-        return Image(nsImage: image)
-        #else
-        return nil
-        #endif
-    }
-}
-
-private struct PhoneAtmosphere: View {
-    var mode: DialMode
-    var reduceMotion: Bool
-
-    var body: some View {
-        ZStack {
-            Color.black
-            MeshGradient(
-                width: 3,
-                height: 3,
-                points: [
-                    .init(0, 0), .init(0.5, 0), .init(1, 0),
-                    .init(0, 0.5), .init(0.42, 0.38), .init(1, 0.55),
-                    .init(0, 1), .init(0.55, 1), .init(1, 1),
-                ],
-                colors: atmosphereColors
-            )
+            .padding(.vertical, 2)
         }
-        .ignoresSafeArea()
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: mode)
-    }
-
-    private var atmosphereColors: [Color] {
-        let rgb = DialTint.rgb(progress: 0.55, muted: false, mode: mode)
-        let tint = Color(red: rgb.0, green: rgb.1, blue: rgb.2)
-        return [
-            tint.opacity(0.42),
-            Color(red: 0.22, green: 0.12, blue: 0.40),
-            Color(red: 0.08, green: 0.28, blue: 0.48),
-            Color(red: 0.18, green: 0.08, blue: 0.28),
-            tint.opacity(0.28),
-            Color(red: 0.06, green: 0.22, blue: 0.36),
-            Color(red: 0.04, green: 0.06, blue: 0.14),
-            Color(red: 0.12, green: 0.08, blue: 0.22),
-            Color.black,
-        ]
+        .scrollIndicators(.never)
     }
 }

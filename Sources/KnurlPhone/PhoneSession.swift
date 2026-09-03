@@ -30,6 +30,16 @@ final class PhoneSession {
 
     var currentMode: DialMode { DialMode(rawValue: face) ?? .volume }
 
+    var destination: String {
+        hello?.destination ?? connectedName ?? "the Mac"
+    }
+
+    var wordsLand: String {
+        "Words land in \(destination)"
+    }
+
+    var isListening: Bool { hello?.listening == true }
+
     private var browser: NWBrowser?
     private var connection: NWConnection?
     private var browseGeneration = 0
@@ -79,7 +89,7 @@ final class PhoneSession {
                     }
                 }
                 .sorted { $0.name < $1.name }
-                if self.connection == nil, let first = self.macs.first {
+                if self.connection == nil, self.macs.count == 1, let first = self.macs.first {
                     self.connect(first)
                 }
             }
@@ -177,6 +187,20 @@ final class PhoneSession {
         confirmTick += 1
     }
 
+    func beginTalk() {
+        send(CrownRequest(action: .talkStart))
+        confirmTick += 1
+    }
+
+    func endTalk() {
+        send(CrownRequest(action: .talkEnd))
+    }
+
+    func cancelTalk() {
+        send(CrownRequest(action: .talkCancel))
+        confirmTick += 1
+    }
+
     private func apply(_ hello: CrownHello) {
         if hello.progress != self.hello?.progress || hello.playing != self.hello?.playing {
             helloAt = Date()
@@ -202,10 +226,10 @@ final class PhoneSession {
     }
 
     private func retryFirstMac() {
-        guard connection == nil, !macs.isEmpty else { return }
+        guard connection == nil, macs.count == 1, let mac = macs.first else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1))
-            guard self.connection == nil, let mac = self.macs.first else { return }
+            guard self.connection == nil, self.macs.count == 1, let mac = self.macs.first else { return }
             self.connect(mac)
         }
     }
