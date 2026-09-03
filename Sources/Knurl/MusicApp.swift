@@ -1,62 +1,124 @@
 import AppKit
+import KnurlCore
 
-enum RepeatMode: String, Sendable {
-    case off
-    case all
-    case one
+// MARK: - Off-main script execution
+//
+// `NSAppleScript` is not thread-safe, and an Apple Event round-trip to
+// Music.app takes tens of milliseconds — occasionally far longer if Music is
+// busy. The meters loop asked for a track snapshot every 400 ms and an AirPlay
+// roster every 2 s, both synchronously on the main thread, so the Hub was
+// blocked waiting on another process for a large slice of every second. That
+// is what a profile of the running app showed at the top of the main thread,
+// and it is why the dial could feel like it was catching.
+//
+// Every script now runs on one serial queue: never concurrently (which
+// `NSAppleScript` does not allow) and never on the main thread (which is what
+// made it visible).
 
-    var next: RepeatMode {
-        switch self {
-        case .off: .all
-        case .all: .one
-        case .one: .off
+enum MusicScript {
+    private static let queue = DispatchQueue(
+        label: "com.shualabs.knurl.applescript",
+        qos: .userInitiated
+    )
+
+    struct Outcome: Sendable {
+        var text: String?
+        var error: String?
+    }
+
+    /// Compiled scripts, reused across calls. Only ever touched from `queue`,
+    /// which is what makes the unchecked annotation true rather than hopeful.
+    private nonisolated(unsafe) static var compiled: [String: NSAppleScript] = [:]
+
+    /// Runs a script off the main thread and hands the result back.
+    static func run(_ source: String) async -> Outcome {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: executeOnQueue(source))
+            }
         }
     }
 
-    var symbol: String {
-        switch self {
-        case .off, .all: "repeat"
-        case .one: "repeat.1"
-        }
+    /// Fire-and-forget, for commands whose result nobody reads.
+    static func send(_ source: String) {
+        queue.async { _ = executeOnQueue(source) }
     }
 
-    var appleScript: String {
-        switch self {
-        case .off: "off"
-        case .all: "all"
-        case .one: "one"
-        }
+    /// Blocking, for the callers that need a descriptor back — artwork data,
+    /// genre lists, and the commands whose success is checked inline.
+    ///
+    /// It still runs on the queue. That is the whole point: `NSAppleScript`
+    /// is not thread-safe, and the corruption it produces is not a crash but
+    /// a *wrong answer* — one script returning another's result. That is
+    /// exactly what happened here. The background queue was added for the two
+    /// polling reads and every other call was left on the main thread, so a
+    /// track snapshot came back holding the AirPlay device list and the Hub
+    /// cheerfully displayed a speaker as the song title.
+    ///
+    /// One queue, every script, no exceptions.
+    static func descriptor(_ source: String) -> NSAppleEventDescriptor? {
+        queue.sync { executeDescriptorOnQueue(source).0 }
     }
 
-    static func parse(_ raw: String) -> RepeatMode {
-        let text = raw.lowercased()
-        if text.contains("one") { return .one }
-        if text.contains("all") { return .all }
-        return .off
+    static func descriptorWithError(_ source: String) -> (NSAppleEventDescriptor?, String?) {
+        queue.sync { executeDescriptorOnQueue(source) }
+    }
+
+    private static func executeDescriptorOnQueue(
+        _ source: String
+    ) -> (NSAppleEventDescriptor?, String?) {
+        let script: NSAppleScript
+        if let cached = compiled[source] {
+            script = cached
+        } else {
+            guard let made = NSAppleScript(source: source) else {
+                return (nil, "Couldn’t build that Music command.")
+            }
+            compiled[source] = made
+            script = made
+        }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        if let error { return (nil, MusicApp.human(error)) }
+        return (result, nil)
+    }
+
+    private static func executeOnQueue(_ source: String) -> Outcome {
+        let (descriptor, error) = executeDescriptorOnQueue(source)
+        return Outcome(text: descriptor?.stringValue, error: error)
+    }
+}
+
+extension MusicAirPlayDevice {
+    var asAudioDevice: AudioDevice {
+        AudioDevice(id: 0, uid: uid, name: name, transport: .airPlay)
     }
 }
 
 @MainActor
 enum MusicApp {
-    struct Track: Equatable {
-        var title: String
-        var artist: String
-        var album: String
-        var genre: String
-        var isPlaying: Bool
-        var position: Double
-        var duration: Double
-        var shuffle: Bool
-        var repeatMode: RepeatMode
-    }
+    public typealias Track = MusicSnapshot
 
     private(set) static var lastError: String?
 
+    /// Whether Music.app is running.
+    ///
+    /// Cached for a second. This is checked before every script, and the
+    /// uncached version walks every running process on the machine — at the
+    /// rate the meters loop asks, that was showing up in a profile on its own.
     static var isOpen: Bool {
-        NSWorkspace.shared.runningApplications.contains {
+        if let checked = openCheckedAt, Date().timeIntervalSince(checked) < 1 {
+            return openCache
+        }
+        openCache = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == "com.apple.Music"
         }
+        openCheckedAt = Date()
+        return openCache
     }
+
+    private static var openCache = false
+    private static var openCheckedAt: Date?
 
     static func ensureOpen() async {
         lastError = nil
@@ -85,7 +147,7 @@ enum MusicApp {
         Task { await ensureOpen() }
     }
 
-    private static let snapshotScript = NSAppleScript(source: """
+    nonisolated static let snapshotSource = """
         tell application "Music"
             try
                 set stateText to player state as string
@@ -108,31 +170,31 @@ enum MusicApp {
                 return (character id 31) & (character id 31) & (character id 31) & "stopped" & (character id 31) & "0" & (character id 31) & "0" & (character id 31) & "false" & (character id 31) & "off" & (character id 31)
             end try
         end tell
-        """)
+        """
+
+    /// The polling read, off the main thread. This is the one the meters loop
+    /// uses; the synchronous `snapshot()` remains for the few callers that
+    /// genuinely need an answer before they return.
+    static func snapshotAsync() async -> Track? {
+        guard isOpen else { return nil }
+        let outcome = await MusicScript.run(snapshotSource)
+        lastError = outcome.error
+        guard let text = outcome.text else { return nil }
+        return parseSnapshot(text)
+    }
 
     static func snapshot() -> Track? {
         guard isOpen else { return nil }
-        guard let text = runCached(snapshotScript)?.stringValue else { return nil }
-        let parts = text.split(separator: "\u{1f}", omittingEmptySubsequences: false).map(String.init)
-        func at(_ index: Int) -> String { parts.indices.contains(index) ? parts[index] : "" }
-        return Track(
-            title: at(0),
-            artist: at(1),
-            album: at(2),
-            genre: Self.cleanGenre(at(8)),
-            isPlaying: at(3).lowercased().contains("play"),
-            position: Double(at(4)) ?? 0,
-            duration: Double(at(5)) ?? 0,
-            shuffle: at(6).lowercased().contains("true"),
-            repeatMode: RepeatMode.parse(at(7))
-        )
+        guard let text = runDescriptor(snapshotSource)?.stringValue else { return nil }
+        return parseSnapshot(text)
     }
 
-    static func cleanGenre(_ raw: String) -> String {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty { return "" }
-        if text.lowercased() == "missing value" { return "" }
-        return text
+    nonisolated static func parseSnapshot(_ text: String) -> Track {
+        MusicSnapshot.parse(text)
+    }
+
+    nonisolated static func cleanGenre(_ raw: String) -> String {
+        MusicSnapshot.cleanGenre(raw)
     }
 
     static func recentGenres() -> [String] {
@@ -280,6 +342,72 @@ enum MusicApp {
         """)
     }
 
+    static func airPlayDevicesAsync() async -> [MusicAirPlayDevice] {
+        guard isOpen else { return [] }
+        let outcome = await MusicScript.run(airPlaySource)
+        lastError = outcome.error
+        guard let text = outcome.text else { return [] }
+        return MusicAirPlayDevice.parseList(text)
+    }
+
+    nonisolated static let airPlaySource = """
+        tell application "Music"
+            try
+                set out to ""
+                repeat with d in AirPlay devices
+                    if (supports audio of d) then
+                        set out to out & name of d & tab & (kind of d as string) & tab & (selected of d as string) & tab & (available of d as string) & (character id 31)
+                    end if
+                end repeat
+                return out
+            on error
+                return ""
+            end try
+        end tell
+        """
+
+    static func airPlayDevices() -> [MusicAirPlayDevice] {
+        guard isOpen else { return [] }
+        guard let text = runDescriptor(airPlaySource)?.stringValue else { return [] }
+        return MusicAirPlayDevice.parseList(text)
+    }
+
+    @discardableResult
+    static func selectAirPlay(_ name: String) -> Bool {
+        let source = """
+        tell application "Music"
+            set current AirPlay devices to {AirPlay device \(quote(name))}
+        end tell
+        """
+        return runDescriptor(source) != nil
+    }
+
+    @discardableResult
+    static func selectComputerAirPlay() -> Bool {
+        let source = """
+        tell application "Music"
+            try
+                set current AirPlay devices to {first AirPlay device whose kind is computer}
+                return true
+            on error
+                return false
+            end try
+        end tell
+        """
+        return runDescriptor(source) != nil
+    }
+
+    static func setAirPlayVolume(_ name: String, percent: Int) {
+        let level = min(100, max(0, percent))
+        _ = runDescriptor("""
+        tell application "Music"
+            try
+                set sound volume of AirPlay device \(quote(name)) to \(level)
+            end try
+        end tell
+        """)
+    }
+
     static func setRepeat(_ mode: RepeatMode) {
         _ = runDescriptor("""
         tell application "Music"
@@ -303,23 +431,12 @@ enum MusicApp {
 
     @discardableResult
     private static func runDescriptor(_ source: String) -> NSAppleEventDescriptor? {
-        runCached(NSAppleScript(source: source))
+        let (descriptor, error) = MusicScript.descriptorWithError(source)
+        lastError = error
+        return descriptor
     }
 
-    @discardableResult
-    private static func runCached(_ script: NSAppleScript?) -> NSAppleEventDescriptor? {
-        lastError = nil
-        guard let script else { return nil }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        if let error {
-            lastError = human(error)
-            return nil
-        }
-        return result
-    }
-
-    private static func human(_ error: NSDictionary) -> String {
+    nonisolated static func human(_ error: NSDictionary) -> String {
         let code = error[NSAppleScript.errorNumber] as? Int ?? 0
         if code == -1743 {
             return "Allow Knurl to control Music in Settings → Privacy → Automation."

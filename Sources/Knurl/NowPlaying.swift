@@ -43,6 +43,24 @@ final class NowPlaying {
     private var lastArtTitle = ""
     private var lastSourcePull = Date.distantPast
     private var lastSnapshot = Date.distantPast
+    private var snapshotPull: Task<Void, Never>?
+    private var musicObserver: NSObjectProtocol?
+
+    /// True while a surface that shows the track is on screen. Parked, Knurl
+    /// still follows Music.app — just at a third of the rate, because the
+    /// playhead is interpolated between snapshots and nobody is reading the
+    /// title of a window that is not open.
+    var attentive = false
+
+    /// How often to ask Music.app anything.
+    ///
+    /// Watching a playhead move on screen is the only case that needs a
+    /// sub-second answer. Otherwise the position is interpolated from the last
+    /// stamp against a local clock, and every real change — track, play,
+    /// pause — arrives as a notification, so a parked Knurl only polls to
+    /// correct drift. Five seconds of drift on an interpolated playhead is
+    /// under a frame's worth of error.
+    private var pollInterval: TimeInterval { attentive ? 0.5 : 5 }
     private var stampedPosition = 0.0
     private var stampedAt = Date()
     private var seeking = false
@@ -80,8 +98,43 @@ final class NowPlaying {
 
     func prepare() {
         stopOwnPlayer()
+        watchMusic()
         refresh(forceArt: true)
         Task { await ensureSources() }
+    }
+
+    // MARK: - Listening instead of asking
+    //
+    // Music.app posts `com.apple.Music.playerInfo` on every track change and
+    // every play/pause. Knurl used to ignore that and ask twice a second
+    // instead, forever — which cost this process about 28% of a core and made
+    // Music.app burn another 13% answering, while the track was *paused* and
+    // nothing was changing. Now the notification says when to look, and the
+    // timer only runs while something is actually moving.
+
+    private func watchMusic() {
+        guard musicObserver == nil else { return }
+        musicObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.Music.playerInfo"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Bypass the interval: this is a real change, not a poll.
+                self.lastSnapshot = .distantPast
+                self.refresh()
+            }
+        }
+    }
+
+    /// Whether the timer still needs to ask.
+    ///
+    /// While playing, a low-rate poll keeps the playhead honest and catches a
+    /// seek made inside Music.app. Paused or stopped, nothing moves, so
+    /// nothing is asked — the notification will say when that changes.
+    var needsPoll: Bool {
+        isPlaying || seeking || Date() < controlHoldUntil || Date() < quietUntil
     }
 
     func authorizeIfNeeded() async {
@@ -178,12 +231,29 @@ final class NowPlaying {
             applyClock(displayedElapsed())
             return
         }
-        if !forceArt, !seeking, Date().timeIntervalSince(lastSnapshot) < 0.45 {
+        if !forceArt, !seeking, Date().timeIntervalSince(lastSnapshot) < pollInterval {
             applyClock(displayedElapsed())
             return
         }
         lastSnapshot = Date()
-        guard let track = MusicApp.snapshot() else {
+        // The snapshot is an Apple Event to another process. Asking for it on
+        // the main thread — sixty times a minute, forever — is what put the
+        // Hub behind Music.app in a profile of the running app. One request in
+        // flight at a time; the answer is applied when it arrives.
+        guard snapshotPull == nil else {
+            applyClock(displayedElapsed())
+            return
+        }
+        snapshotPull = Task { @MainActor [weak self] in
+            let track = await MusicApp.snapshotAsync()
+            guard let self else { return }
+            self.snapshotPull = nil
+            self.apply(track, forceArt: forceArt)
+        }
+    }
+
+    private func apply(_ track: MusicApp.Track?, forceArt: Bool) {
+        guard let track else {
             if !MusicApp.isOpen {
                 clearTrack()
             }
