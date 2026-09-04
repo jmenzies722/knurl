@@ -29,7 +29,6 @@ struct NotchView: View {
             if showsWrap {
                 NotchWrap(
                     housing: state.notchHousing,
-                    panelWidth: NotchMath.maxContentWidth(housing: state.notchHousing),
                     progress: state.music.displayedPlayhead(),
                     tint: housingTint,
                     lively: lively

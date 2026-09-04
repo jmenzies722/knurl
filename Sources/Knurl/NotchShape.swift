@@ -291,7 +291,6 @@ struct NotchOutline: Shape {
 /// The wrap, positioned on the housing and filling with playback.
 struct NotchWrap: View {
     var housing: CGRect
-    var panelWidth: CGFloat
     var progress: Double
     var tint: Color
     var lively: Bool
@@ -299,17 +298,26 @@ struct NotchWrap: View {
     private let width: CGFloat = 3
 
     var body: some View {
-        NotchOutline(cornerRadius: 12)
-            .trim(from: 0, to: DialMath.clampVolume(progress))
-            .stroke(tint, style: StrokeStyle(lineWidth: width, lineCap: .round))
-            .shadow(color: tint.opacity(0.7), radius: 4)
-            // Expanded by half the stroke so the line sits just outside the
-            // cutout rather than under it.
-            .frame(width: housing.width + width, height: housing.height + width / 2)
-            .offset(x: (panelWidth - housing.width - width) / 2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .animation(lively ? .linear(duration: 0.9) : nil, value: progress)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        // Measured from the container rather than handed a panel width.
+        //
+        // It was passed `maxContentWidth` and centred against that. The moment
+        // the two disagreed — which happened, because a stale flare value left
+        // the real panel 132 points wider than the computed one — the line sat
+        // off to one side of the cutout. Reading the actual width cannot drift.
+        GeometryReader { geometry in
+            NotchOutline(cornerRadius: 12)
+                .trim(from: 0, to: DialMath.clampVolume(progress))
+                .stroke(tint, style: StrokeStyle(lineWidth: width, lineCap: .round))
+                .shadow(color: tint.opacity(0.7), radius: 4)
+                // Half a stroke proud of the cutout on every side, so the line
+                // lies against its edge instead of under it.
+                .frame(width: housing.width + width, height: housing.height + width / 2)
+                .position(
+                    x: geometry.size.width / 2,
+                    y: (housing.height + width / 2) / 2
+                )
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

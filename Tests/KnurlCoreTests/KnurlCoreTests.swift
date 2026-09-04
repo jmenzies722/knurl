@@ -551,6 +551,20 @@ struct NotchStageTests {
     /// Deriving the housing from the menu bar hangs the shape one point below
     /// the bezel, right across the notch — a black ledge, and the single
     /// reason it stopped looking flush.
+    /// The panel has to be exactly as wide as the widest stage needs.
+    ///
+    /// A stale flare value once left the real panel 132 points wider than the
+    /// content it held, which showed up as a notch that was too wide and a
+    /// wrap line sitting off to one side. Neither was visible in a diff.
+    @Test func thePanelIsExactlyAsWideAsItsWidestStage() {
+        let frame = NotchMath.panelFrame(screen: screen, housing: housing)
+        let widest = NotchStage.allCases
+            .map { NotchMath.contentSize(housing: housing, stage: $0).width }
+            .max()!
+        #expect(frame.width == widest, "the panel must fit its widest stage and no more")
+        #expect(frame.width < 460, "and a 220-point notch should not open a slab")
+    }
+
     @Test func theHousingIsTheCutoutNotTheMenuBar() {
         #expect(housing.height == 38)
         #expect(housing.maxY == screen.maxY)

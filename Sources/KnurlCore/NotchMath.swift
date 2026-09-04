@@ -52,12 +52,13 @@ public enum NotchStage: String, Sendable, CaseIterable {
         switch self {
         case .rest: 0
         case .glance: -7
-        case .hover: 96
-        // Wider than hover: the shelf carries cover art, a title, three
-        // transport keys and two more besides. Sized to its content rather
-        // than to a round number.
-        case .shelf: 156
-        case .flow: 104
+        // Measured against the content, not chosen as a round number: two
+        // 20-point margins, 48-point artwork, a 182-point title column and
+        // 108 points of transport come to 400. Wider than that and the first
+        // row develops a hole in the middle of it.
+        case .hover: 62
+        case .shelf: 90
+        case .flow: 78
         }
     }
 
