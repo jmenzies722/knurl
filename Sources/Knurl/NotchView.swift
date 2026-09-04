@@ -300,14 +300,14 @@ struct NotchView: View {
     // camera was neither pleasant nor precise.
 
     private var glanceShelf: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 12) {
             subjectHeader
             if subject == .media { mediaScrubber }
             controlRow
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 18)
+        .padding(.bottom, 16)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(whisper.line). \(whisper.detail)")
     }
@@ -329,18 +329,21 @@ struct NotchView: View {
                     }
                 }
             }
-            .frame(width: 54, height: 54)
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(.white.opacity(0.10), lineWidth: 1)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(shelfTitle)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                    // Shrink a little before truncating: a long track name is
+                    // still readable at 13 points and unreadable as an ellipsis.
+                    .minimumScaleFactor(0.82)
                 Text(shelfDetail)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
@@ -351,14 +354,14 @@ struct NotchView: View {
 
             if subject == .media {
                 HStack(spacing: 8) {
-                    shelfKey("backward.fill", "Previous", size: 30) { state.skip(-1) }
+                    shelfKey("backward.fill", "Previous", size: 28) { state.skip(-1) }
                     shelfKey(
                         state.music.isPlaying ? "pause.fill" : "play.fill",
                         state.music.isPlaying ? "Pause" : "Play",
-                        size: 38,
+                        size: 36,
                         prominent: true
                     ) { state.collapsedPlay() }
-                    shelfKey("forward.fill", "Next", size: 30) { state.skip(1) }
+                    shelfKey("forward.fill", "Next", size: 28) { state.skip(1) }
                 }
             } else if subject == .hour {
                 shelfKey(
@@ -406,14 +409,12 @@ struct NotchView: View {
                 progress: state.volumeProgress,
                 label: "Volume"
             ) { state.setRoomVolume($0) }
-            .frame(maxWidth: 250, alignment: .leading)
 
             NotchScrubber(
                 symbol: "sun.max.fill",
                 progress: Double(state.brightnessPercent) / 100,
                 label: "Brightness"
             ) { state.setRoomBrightness($0) }
-            .frame(maxWidth: 250, alignment: .leading)
 
             HStack(spacing: 8) {
                 flowButton
@@ -445,7 +446,7 @@ struct NotchView: View {
                     lively: lively,
                     height: 14
                 )
-                Text(state.harnessName)
+                Text(state.voice.isListening ? state.harnessName : "Starting…")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.black.opacity(0.7))
                     .lineLimit(1)
@@ -541,15 +542,24 @@ struct NotchView: View {
             HStack(spacing: 10) {
                 KnurlEqualizer(
                     levels: state.voice.levels,
-                    tint: KnurlPalette.live,
+                    tint: state.voice.isListening ? KnurlPalette.live : .white.opacity(0.4),
                     bars: 4,
-                    active: state.voice.isActive,
+                    active: state.voice.isListening,
                     lively: lively,
                     height: 15
                 )
-                Text(state.voice.isActive ? "Listening" : "Done")
+                // "Listening" only once the analyser is actually running.
+                //
+                // There is a real gap between pressing the key and the speech
+                // session being ready, and anything said in it is lost. Saying
+                // "Listening" during that window is a lie that costs you your
+                // first few words; "Starting" tells you to wait for the green.
+                Text(flowStatus)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(KnurlPalette.live)
+                    .foregroundStyle(
+                        state.voice.isListening ? KnurlPalette.live : .white.opacity(0.5)
+                    )
+                    .contentTransition(.opacity)
                 Spacer(minLength: 0)
                 Text("→ \(state.harnessName)")
                     .font(.system(size: 11, weight: .medium))
@@ -654,6 +664,12 @@ struct NotchView: View {
         if state.desk.timer.running { return state.desk.timer.crownProgress }
         if state.music.isPlaying, state.music.canSeek { return state.music.displayedPlayhead() }
         return nil
+    }
+
+    private var flowStatus: String {
+        if state.voice.isListening { return "Listening" }
+        if state.voice.isActive { return "Starting…" }
+        return "Done"
     }
 
     private var flowLine: String {
