@@ -64,6 +64,7 @@ final class DialState {
     }
     var launchesAtLogin = LoginItem.isEnabled
     var showsMenuBarItem = Preferences.menuBarItem
+    var notchTint = Preferences.notchTint
     var loginItemError: String?
     var inputUID = ""
     var inputDevices: [AudioDevice] = []
@@ -397,6 +398,11 @@ final class DialState {
         inputs.select(device.id)
         refreshMeters()
         DialTick.play()
+    }
+
+    func setNotchTint(_ tint: NotchTint) {
+        notchTint = tint
+        Preferences.notchTint = tint
     }
 
     func setShowsMenuBarItem(_ on: Bool) {

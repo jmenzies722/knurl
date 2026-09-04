@@ -858,3 +858,28 @@ struct TrackSnapshotTests {
         #expect(track.duration == 0)
     }
 }
+
+// MARK: - Notch tint
+
+@Suite("Notch tint")
+struct NotchTintTests {
+    @Test func automaticIsTheOnlyOneWithoutAColour() {
+        // `automatic` means "follow what is happening", so it deliberately has
+        // no colour of its own. Every other case must have one, or picking it
+        // would silently fall back to automatic and look like nothing
+        // happened.
+        #expect(NotchTint.automatic.color == nil)
+        for tint in NotchTint.allCases where tint != .automatic {
+            #expect(tint.color != nil, "\(tint) must resolve to a colour")
+            #expect(!tint.title.isEmpty)
+        }
+    }
+
+    @Test func everyTintSurvivesBeingStoredAndReadBack() {
+        for tint in NotchTint.allCases {
+            #expect(NotchTint(rawValue: tint.rawValue) == tint)
+        }
+        // An unknown or corrupt stored value falls back rather than crashing.
+        #expect(NotchTint(rawValue: "chartreuse") == nil)
+    }
+}

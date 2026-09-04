@@ -19,6 +19,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: KnurlSpace.room) {
                     feel
+                    notch
                     flow
                     weather
                     desk
@@ -106,6 +107,54 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: Notch
+
+    @ViewBuilder
+    private var notch: some View {
+        if state.hasNotchHousing {
+            card(title: "Notch") {
+                VStack(alignment: .leading, spacing: KnurlSpace.step) {
+                    labelled("Colour") {
+                        HStack(spacing: KnurlSpace.snug) {
+                            ForEach(NotchTint.allCases) { tint in
+                                swatch(tint)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    note(state.notchTint == .automatic
+                        ? "Automatic follows what is happening: green while dictating, amber for the hour, the track's own hue while music plays."
+                        : "\(state.notchTint.title) always. The notch stops reporting state through colour — which is the trade.")
+                }
+            }
+        }
+    }
+
+    private func swatch(_ tint: NotchTint) -> some View {
+        let selected = state.notchTint == tint
+        return Circle()
+            .fill(tint.swatch)
+            .frame(width: 24, height: 24)
+            .overlay {
+                Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            }
+            .overlay {
+                // The selection ring sits outside the swatch so it never
+                // covers the colour you are trying to judge.
+                Circle()
+                    .strokeBorder(KnurlPalette.ink, lineWidth: 2)
+                    .padding(-4)
+                    .opacity(selected ? 1 : 0)
+            }
+            .scaleEffect(selected ? 1.05 : 1)
+            .animation(KnurlMotion.snap, value: selected)
+            .contentShape(Circle())
+            .overlay(ImmediatePress { state.setNotchTint(tint) })
+            .help(tint.title)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityLabel(tint.title)
     }
 
     // MARK: Flow

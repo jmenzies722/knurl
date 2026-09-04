@@ -755,3 +755,72 @@ public struct KnurlEqualizer: View {
         return CGFloat(0.28 + 0.62 * abs(sin(t * speed + phase)))
     }
 }
+
+// MARK: - Notch tint
+//
+// What colour the notch lights up in. `automatic` keeps the behaviour the
+// notch was built with — green while dictating, amber for the hour, the
+// media hue while a track plays — because the colour is carrying meaning
+// there. Pick a fixed one and it stops reporting and just looks how you want,
+// which is a fair trade to want.
+
+public enum NotchTint: String, CaseIterable, Sendable, Identifiable {
+    case automatic
+    case blue
+    case teal
+    case green
+    case yellow
+    case orange
+    case pink
+    case purple
+    case graphite
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .blue: "Blue"
+        case .teal: "Teal"
+        case .green: "Green"
+        case .yellow: "Yellow"
+        case .orange: "Orange"
+        case .pink: "Pink"
+        case .purple: "Purple"
+        case .graphite: "Graphite"
+        }
+    }
+
+    /// Nil means "follow whatever is happening".
+    public var color: Color? {
+        switch self {
+        case .automatic: nil
+        case .blue: Color(red: 0.04, green: 0.52, blue: 1.00)
+        case .teal: Color(red: 0.19, green: 0.78, blue: 0.82)
+        case .green: Color(red: 0.19, green: 0.82, blue: 0.35)
+        case .yellow: Color(red: 1.00, green: 0.84, blue: 0.04)
+        case .orange: Color(red: 1.00, green: 0.62, blue: 0.04)
+        case .pink: Color(red: 1.00, green: 0.18, blue: 0.33)
+        case .purple: Color(red: 0.75, green: 0.35, blue: 0.95)
+        case .graphite: Color(white: 0.78)
+        }
+    }
+
+    /// What to show in a swatch. Automatic has no single colour, so it gets
+    /// the spectrum it actually chooses from.
+    public var swatch: AnyShapeStyle {
+        if let color {
+            return AnyShapeStyle(color)
+        }
+        return AnyShapeStyle(
+            AngularGradient(
+                colors: [
+                    NotchTint.green.color!, NotchTint.teal.color!, NotchTint.blue.color!,
+                    NotchTint.purple.color!, NotchTint.pink.color!, NotchTint.orange.color!,
+                    NotchTint.green.color!,
+                ],
+                center: .center
+            )
+        )
+    }
+}

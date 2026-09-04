@@ -530,8 +530,11 @@ struct NotchView: View {
             || !state.desk.attention.isEmpty
     }
 
-    /// One colour, chosen by what is actually happening.
+    /// One colour, chosen by what is actually happening — unless you have
+    /// picked one, in which case yours wins and the notch stops reporting
+    /// state through colour.
     private var housingTint: Color {
+        if let chosen = state.notchTint.color { return chosen }
         if state.voice.isActive { return KnurlPalette.live }
         if !state.desk.attention.isEmpty { return KnurlPalette.alert }
         if state.desk.timer.running { return KnurlPalette.warn }

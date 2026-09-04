@@ -15,6 +15,7 @@ enum Preferences {
     private static let clipboardShelfKey = "knurl.clipboard.shelf"
     private static let weatherKey = "knurl.weather.enabled"
     private static let menuBarKey = "knurl.menubar.item"
+    private static let notchTintKey = "knurl.notch.tint"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -86,6 +87,11 @@ enum Preferences {
     /// the main actor, so that decision lives in AppDelegate rather than here.
     static var hasChosenMenuBar: Bool {
         UserDefaults.standard.object(forKey: menuBarKey) != nil
+    }
+
+    static var notchTint: NotchTint {
+        get { NotchTint(rawValue: UserDefaults.standard.string(forKey: notchTintKey) ?? "") ?? .automatic }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: notchTintKey) }
     }
 
     static var powerMode: PowerMode {
