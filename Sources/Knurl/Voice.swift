@@ -212,6 +212,7 @@ final class Voice {
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         try await analyzer.start(inputSequence: stream)
         let engine = try makeEngine(into: continuation, format: format)
+
         let results = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -278,7 +279,17 @@ final class Voice {
                 var eaten = false
                 converter.convert(to: out, error: &error) { _, status in
                     if eaten {
-                        status.pointee = .endOfStream
+                        // `.noDataNow`, never `.endOfStream`.
+                        //
+                        // The converter is one long-lived object reused for
+                        // every buffer the tap delivers, and `endOfStream` is
+                        // a terminal state: it means the whole stream is over,
+                        // not this buffer. Saying it once poisoned the
+                        // converter for good, so of fifty-four buffers of
+                        // clear speech exactly one reached the analyser and
+                        // Flow transcribed nothing, forever. `noDataNow` says
+                        // "that is all I have this moment", which is the truth.
+                        status.pointee = .noDataNow
                         return nil
                     }
                     eaten = true

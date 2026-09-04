@@ -1,5 +1,7 @@
 import AppKit
 import ApplicationServices
+import Speech
+import AVFoundation
 import SwiftUI
 
 @MainActor
