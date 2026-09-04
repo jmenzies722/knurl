@@ -304,6 +304,7 @@ struct NotchView: View {
             subjectHeader
             if subject == .media { mediaScrubber }
             controlRow
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 18)
@@ -403,16 +404,16 @@ struct NotchView: View {
             NotchScrubber(
                 symbol: state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 progress: state.volumeProgress,
-                tint: DialSwatch.tint(.volume, state: state),
                 label: "Volume"
             ) { state.setRoomVolume($0) }
+            .frame(maxWidth: 250, alignment: .leading)
 
             NotchScrubber(
                 symbol: "sun.max.fill",
                 progress: Double(state.brightnessPercent) / 100,
-                tint: DialSwatch.bright,
                 label: "Brightness"
             ) { state.setRoomBrightness($0) }
+            .frame(maxWidth: 250, alignment: .leading)
 
             HStack(spacing: 8) {
                 flowButton
@@ -420,6 +421,7 @@ struct NotchView: View {
                     state.presentHub()
                 }
             }
+            .padding(.top, 2)
         }
     }
 
@@ -528,27 +530,55 @@ struct NotchView: View {
     }
 
     // MARK: Flow
+    //
+    // The words, as they arrive, at a size you can read from where you are
+    // sitting — not a caption under a waveform. What you want to know while
+    // dictating is whether it heard you correctly, and only the text answers
+    // that. The levels stay, small, as proof the microphone is live.
 
     private var flowShelf: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                flowLead
-                Spacer(minLength: 8)
+                KnurlEqualizer(
+                    levels: state.voice.levels,
+                    tint: KnurlPalette.live,
+                    bars: 4,
+                    active: state.voice.isActive,
+                    lively: lively,
+                    height: 15
+                )
+                Text(state.voice.isActive ? "Listening" : "Done")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(KnurlPalette.live)
+                Spacer(minLength: 0)
+                Text("→ \(state.harnessName)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+
+            Text(flowLine)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.opacity)
+                .animation(lively ? .easeOut(duration: 0.12) : nil, value: flowLine)
+
+            HStack(spacing: 8) {
                 if state.voice.isActive {
                     notchCapsule("Cancel") { state.cancelTalk() }
                 } else if !state.voice.lastTranscript.isEmpty {
-                    notchCapsule("Resend") { state.resendTalk() }
+                    notchCapsule("Send again") { state.resendTalk() }
                 }
+                Spacer(minLength: 0)
                 holdCapsule
             }
-            Text(flowLine)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.95))
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 18)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(flowLine). \(state.harnessName)")
     }
