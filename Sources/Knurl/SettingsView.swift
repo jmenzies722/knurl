@@ -124,6 +124,11 @@ struct SettingsView: View {
                             Spacer(minLength: 0)
                         }
                     }
+                    toggle(
+                        "Wrap playback around the notch",
+                        detail: "A line traces the cutout's outline as a track plays. It is the one thing the notch does on its own, so it is also the one thing worth being able to switch off.",
+                        isOn: state.notchWrap
+                    ) { state.setNotchWrap($0) }
                     note(state.notchTint == .automatic
                         ? "Automatic follows what is happening: green while dictating, amber for the hour, the track's own hue while music plays."
                         : "\(state.notchTint.title) always. The notch stops reporting state through colour — which is the trade.")

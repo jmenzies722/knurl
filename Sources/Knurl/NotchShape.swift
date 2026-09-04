@@ -252,3 +252,64 @@ struct NotchScrubber: View {
         }
     }
 }
+
+// MARK: - Wrap
+//
+// A progress line that traces the cutout's own outline: down the left edge,
+// around the bottom corners, up the right. It has to be drawn *outside* the
+// masked shape and just outside the housing rect, because the cutout is a
+// hole — there are no pixels behind it to draw on. Hugging its edge from the
+// outside is the only way to appear to be on it.
+
+struct NotchOutline: Shape {
+    /// The cutout's bottom corner radius.
+    var cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let r = min(cornerRadius, min(rect.width, rect.height) / 2)
+
+        // Down the left edge from the top of the screen.
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - r))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + r, y: rect.maxY),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        // Across the bottom.
+        path.addLine(to: CGPoint(x: rect.maxX - r, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.maxY - r),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        // Back up the right edge.
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
+}
+
+/// The wrap, positioned on the housing and filling with playback.
+struct NotchWrap: View {
+    var housing: CGRect
+    var panelWidth: CGFloat
+    var progress: Double
+    var tint: Color
+    var lively: Bool
+
+    private let width: CGFloat = 3
+
+    var body: some View {
+        NotchOutline(cornerRadius: 12)
+            .trim(from: 0, to: DialMath.clampVolume(progress))
+            .stroke(tint, style: StrokeStyle(lineWidth: width, lineCap: .round))
+            .shadow(color: tint.opacity(0.7), radius: 4)
+            // Expanded by half the stroke so the line sits just outside the
+            // cutout rather than under it.
+            .frame(width: housing.width + width, height: housing.height + width / 2)
+            .offset(x: (panelWidth - housing.width - width) / 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .animation(lively ? .linear(duration: 0.9) : nil, value: progress)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}

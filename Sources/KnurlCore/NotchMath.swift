@@ -31,11 +31,11 @@ public enum NotchStage: String, Sendable, CaseIterable {
         switch self {
         case .rest: 0
         case .glance: 5
-        case .hover: 56
+        case .hover: 64
         // Sized to what it actually holds now — a subject, a scrubber and two
         // levels — rather than to the control panel it used to be. Every
         // point of height here is a point of black hanging over your work.
-        case .shelf: 174
+        case .shelf: 186
         case .flow: 138
         }
     }

@@ -24,6 +24,30 @@ struct NotchView: View {
     private var stage: NotchStage { state.notchStage }
 
     var body: some View {
+        ZStack(alignment: .top) {
+            shapeAndContent
+            if showsWrap {
+                NotchWrap(
+                    housing: state.notchHousing,
+                    panelWidth: NotchMath.maxContentWidth(housing: state.notchHousing),
+                    progress: state.music.displayedPlayhead(),
+                    tint: housingTint,
+                    lively: lively
+                )
+            }
+        }
+    }
+
+    /// Playback traced around the cutout, when there is playback to trace and
+    /// you have not turned it off.
+    private var showsWrap: Bool {
+        state.notchWrap
+            && state.music.isPlaying
+            && state.music.canSeek
+            && state.notchHousing.width > 1
+    }
+
+    private var shapeAndContent: some View {
         NotchStageContainer(
             housing: state.notchHousing,
             stage: stage,
@@ -158,6 +182,7 @@ struct NotchView: View {
             }
         }
         .padding(.horizontal, 18)
+        .padding(.top, 10)
         .padding(.bottom, 10)
         .frame(maxHeight: .infinity, alignment: .bottom)
     }
@@ -307,6 +332,10 @@ struct NotchView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 20)
+        // Clear of the cutout. Bottom-aligned content in a short stage ends up
+        // tight under the bezel, so the artwork reads as tucked behind the
+        // notch rather than sitting below it.
+        .padding(.top, 12)
         .padding(.bottom, 16)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(whisper.line). \(whisper.detail)")

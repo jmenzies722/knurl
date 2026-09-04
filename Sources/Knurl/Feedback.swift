@@ -16,6 +16,7 @@ enum Preferences {
     private static let weatherKey = "knurl.weather.enabled"
     private static let menuBarKey = "knurl.menubar.item"
     private static let notchTintKey = "knurl.notch.tint"
+    private static let notchWrapKey = "knurl.notch.wrap"
 
     static var sound: TickSound {
         get { TickSound(rawValue: UserDefaults.standard.string(forKey: soundKey) ?? "") ?? .tink }
@@ -92,6 +93,17 @@ enum Preferences {
     static var notchTint: NotchTint {
         get { NotchTint(rawValue: UserDefaults.standard.string(forKey: notchTintKey) ?? "") ?? .automatic }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: notchTintKey) }
+    }
+
+    /// Whether playback traces the cutout's outline. On by default; it is the
+    /// one ambient thing the notch does, and some people will not want a line
+    /// moving at the top of their screen all day.
+    static var notchWrap: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: notchWrapKey) == nil { return true }
+            return UserDefaults.standard.bool(forKey: notchWrapKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: notchWrapKey) }
     }
 
     static var powerMode: PowerMode {
