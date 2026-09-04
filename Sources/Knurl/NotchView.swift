@@ -386,10 +386,14 @@ struct NotchView: View {
         }
     }
 
-    /// Volume and brightness, because those are the two you reach for without
-    /// wanting to look at anything. Everything else is a click into the Hub.
+    /// Volume and brightness, stacked.
+    ///
+    /// Side by side each slider got half the width, which on a control you set
+    /// by pointing at a position is half the precision — the two things you
+    /// most often want to nudge were the two hardest to hit. Full width each,
+    /// one above the other, costs a little height and doubles the resolution.
     private var controlRow: some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 9) {
             NotchScrubber(
                 symbol: state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 progress: state.volumeProgress,
@@ -404,10 +408,79 @@ struct NotchView: View {
                 label: "Brightness"
             ) { state.setRoomBrightness($0) }
 
-            shelfKey("square.grid.2x2.fill", "Open the Hub", size: 30) {
-                state.presentHub()
+            HStack(spacing: 8) {
+                flowButton
+                shelfKey("square.grid.2x2.fill", "Open the Hub", size: 32) {
+                    state.presentHub()
+                }
             }
         }
+    }
+
+    /// Hold to talk, and it shows you that it is listening rather than telling
+    /// you. At rest it is a quiet pill; held, it fills with your own levels
+    /// and lights, so the feedback is the thing the microphone is actually
+    /// hearing rather than a label that says "recording".
+    private var flowButton: some View {
+        HStack(spacing: 9) {
+            Image(systemName: state.voice.isActive ? "waveform" : "mic.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(state.voice.isActive ? .black : .white.opacity(0.9))
+                .contentTransition(.symbolEffect(.replace))
+
+            if state.voice.isActive {
+                KnurlEqualizer(
+                    levels: state.voice.levels,
+                    tint: .black.opacity(0.75),
+                    bars: 5,
+                    active: true,
+                    lively: lively,
+                    height: 14
+                )
+                Text(state.harnessName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.black.opacity(0.7))
+                    .lineLimit(1)
+            } else {
+                Text("Hold to talk")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text("⌃⌥M")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 32)
+        .frame(maxWidth: .infinity)
+        .background {
+            Capsule().fill(
+                state.voice.isActive
+                    ? AnyShapeStyle(KnurlPalette.live)
+                    : AnyShapeStyle(Color.white.opacity(0.10))
+            )
+        }
+        .overlay {
+            Capsule().strokeBorder(
+                state.voice.isActive ? .clear : .white.opacity(0.12),
+                lineWidth: 1
+            )
+        }
+        .shadow(
+            color: state.voice.isActive ? KnurlPalette.live.opacity(0.5) : .clear,
+            radius: 12,
+            y: 2
+        )
+        .animation(lively ? KnurlMotion.settle : nil, value: state.voice.isActive)
+        .overlay(
+            ImmediateHold(
+                down: { state.beginTalk(presentHUD: false) },
+                up: { state.endTalk() }
+            )
+        )
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(state.voice.isActive ? "Release to paste" : "Hold to talk")
     }
 
     private func shelfKey(

@@ -588,14 +588,24 @@ struct NotchStageTests {
         }
     }
 
-    @Test func everyStageIsAtLeastAsWideAsTheCutout() {
-        // Narrower than the notch and the fillets would curve inward from
-        // nothing, which reads as a bite taken out of the bezel.
-        for stage in NotchStage.allCases {
+    @Test func openStagesAreWiderThanTheCutoutAndTheHintIsNarrower() {
+        // Open stages must be at least as wide as the notch, or the concave
+        // fillets would curve in from nothing and read as a bite out of the
+        // bezel. The glance hint is the opposite case on purpose: full width
+        // with a few points of drop is a square black ledge sticking out
+        // below the bezel, so it is pulled in to a rounded tab that tucks
+        // under instead.
+        for stage in [NotchStage.hover, .shelf, .flow] {
             let size = NotchMath.contentSize(housing: housing, stage: stage)
-            #expect(size.width >= housing.width)
-            #expect(size.height >= housing.height)
+            #expect(size.width > housing.width, "\(stage) must clear the cutout")
+            #expect(size.height > housing.height)
         }
+
+        let hint = NotchMath.contentSize(housing: housing, stage: .glance)
+        #expect(hint.width < housing.width, "the hint must tuck under, not stick out")
+        #expect(hint.width > 60, "but it still has to be visible")
+        // A capsule: corner radius is half the drop, so it has no corners.
+        #expect(NotchStage.glance.bottomCornerRadius * 2 == NotchStage.glance.height)
     }
 
     @Test func restIsExactlyTheCutout() {
@@ -619,7 +629,7 @@ struct NotchStageTests {
         // widen because there is nothing under there to hide.
         #expect(NotchStage.rest.height == 0)
         #expect(NotchStage.rest.flare == 0)
-        #expect(NotchStage.glance.flare == 0, "the live hint must not widen over the menu bar")
+        #expect(NotchStage.glance.flare < 0, "the live hint must tuck under, never widen")
         #expect(NotchStage.glance.height > 0, "but it must show something")
         #expect(NotchStage.glance.height < 8, "and it must stay a hint, not a bar")
 

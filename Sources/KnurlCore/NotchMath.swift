@@ -30,28 +30,28 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var height: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 4
+        case .glance: 5
         case .hover: 56
         // Sized to what it actually holds now — a subject, a scrubber and two
         // levels — rather than to the control panel it used to be. Every
         // point of height here is a point of black hanging over your work.
-        case .shelf: 150
+        case .shelf: 196
         case .flow: 116
         }
     }
 
-    /// Extra width beyond the housing, per side.
+    /// Width relative to the housing, per side. Negative means narrower.
     ///
-    /// Zero at rest and a hair at glance, so the silhouette *is* the cutout.
-    /// Opening flares out over the menu bar, but less than it used to — the
-    /// old 150 points a side made a 520-point slab appear from a 220-point
-    /// notch, which read as a panel arriving rather than the notch growing.
+    /// Zero at rest, and deliberately *negative* at glance. A shape the full
+    /// width of the cutout with a few points of drop shows a wide black ledge
+    /// with hard ends below the bezel — square, and obviously beyond the
+    /// notch. Pulled in on both sides it becomes a small rounded tab tucked
+    /// underneath, which reads as part of the notch rather than as something
+    /// sticking out of it.
     public var flare: CGFloat {
         switch self {
         case .rest: 0
-        // Zero: the silhouette stays the cutout. This is the whole reason it
-        // reads as the notch rather than as something stuck to it.
-        case .glance: 0
+        case .glance: -52
         case .hover: 96
         // Wider than hover: the shelf carries cover art, a title, three
         // transport keys and two more besides. Sized to its content rather
@@ -81,7 +81,8 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var bottomCornerRadius: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: 2
+        // Half the height: the tab is a capsule, so it has no corners at all.
+        case .glance: 2.5
         case .hover: 26
         case .shelf, .flow: 30
         }
@@ -160,14 +161,16 @@ public enum NotchMath: Sendable {
     }
 
     public static func maxContentWidth(housing: CGRect) -> CGFloat {
-        housing.width + 2 * (NotchStage.allCases.map(\.flare).max() ?? 0)
+        housing.width + 2 * max(0, NotchStage.allCases.map(\.flare).max() ?? 0)
     }
 
     /// The shape's size for a stage: the housing plus its flare, and the
     /// housing's own height plus whatever is hanging below it.
     public static func contentSize(housing: CGRect, stage: NotchStage) -> CGSize {
         CGSize(
-            width: housing.width + 2 * stage.flare,
+            // Flare may be negative, so this is clamped: a shape narrower than
+            // its own corner radii cannot be drawn.
+            width: max(48, housing.width + 2 * stage.flare),
             height: housing.height + stage.height
         )
     }
