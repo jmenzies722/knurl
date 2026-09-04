@@ -70,17 +70,20 @@ public enum NotchStage: String, Sendable, CaseIterable {
     public var topCornerRadius: CGFloat {
         switch self {
         case .rest, .glance: 0
-        case .hover, .shelf, .flow: 11
+        case .hover, .shelf, .flow: 13
         }
     }
 
     /// The ordinary rounded corners along the bottom.
+    /// Generous on purpose. A shape hanging off a bezel with tight corners
+    /// reads as a panel that happens to be up there; the roundness is what
+    /// makes it read as part of the machine.
     public var bottomCornerRadius: CGFloat {
         switch self {
         case .rest: 0
         case .glance: 2
-        case .hover: 16
-        case .shelf, .flow: 20
+        case .hover: 26
+        case .shelf, .flow: 30
         }
     }
 

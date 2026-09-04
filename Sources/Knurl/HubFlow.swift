@@ -35,7 +35,17 @@ struct HubFlow: View {
         .animation(live.motion(KnurlMotion.heavy), value: state.voice.isActive)
         .animation(live.motion(), value: state.voice.lastTranscript)
         .animation(live.motion(), value: readiness)
-        .onAppear { readiness = Voice.readiness }
+        .onAppear {
+            readiness = Voice.readiness
+            // Ask the moment you open the page, not the moment you hold the
+            // key. Opening Flow *is* the intent, the app is frontmost, and you
+            // are looking at the thing the prompt is about — which is why the
+            // permissions had never been granted: they were only ever asked
+            // for from the background, mid-gesture, behind another window.
+            if Voice.needsListeningPrompt {
+                Task { readiness = await Voice.requestListening() }
+            }
+        }
         // The Accessibility grant restarts the app, but microphone and speech
         // do not — so the card has to notice when you come back from Settings.
         .onReceive(NotificationCenter.default.publisher(

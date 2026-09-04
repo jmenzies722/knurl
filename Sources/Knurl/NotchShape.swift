@@ -37,29 +37,51 @@ struct KnurlNotchShape: Shape {
         let top = max(0, min(topCornerRadius, rect.width / 2))
         let bottom = max(0, min(bottomCornerRadius, rect.width / 2 - top))
 
+        // Cubic curves, not quadratics.
+        //
+        // A quadratic has a single control point, so where the fillet meets
+        // the straight edge the curvature jumps from "turning hard" to "not
+        // turning at all" in one step. The eye reads that discontinuity as a
+        // corner — which is why the old shape looked pointy where it should
+        // have looked poured. Two control points let the curvature arrive at
+        // zero gradually, which is the same trick a continuous corner uses,
+        // and what makes Apple's own rounded shapes look moulded rather than
+        // filleted.
+        let k: CGFloat = 0.5523  // circle-to-Bézier constant, softened below
+
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
 
-        // Leading concave fillet: down and inward.
-        path.addQuadCurve(
+        // Leading concave fillet: out of the bezel and down.
+        path.addCurve(
             to: CGPoint(x: rect.minX + top, y: rect.minY + top),
-            control: CGPoint(x: rect.minX + top, y: rect.minY)
+            control1: CGPoint(x: rect.minX + top * k * 1.25, y: rect.minY),
+            control2: CGPoint(x: rect.minX + top, y: rect.minY + top * (1 - k) * 0.9)
         )
         path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
-        path.addQuadCurve(
+
+        // Leading bottom corner.
+        path.addCurve(
             to: CGPoint(x: rect.minX + top + bottom, y: rect.maxY),
-            control: CGPoint(x: rect.minX + top, y: rect.maxY)
+            control1: CGPoint(x: rect.minX + top, y: rect.maxY - bottom * (1 - k)),
+            control2: CGPoint(x: rect.minX + top + bottom * (1 - k), y: rect.maxY)
         )
         path.addLine(to: CGPoint(x: rect.maxX - top - bottom, y: rect.maxY))
-        path.addQuadCurve(
+
+        // Trailing bottom corner.
+        path.addCurve(
             to: CGPoint(x: rect.maxX - top, y: rect.maxY - bottom),
-            control: CGPoint(x: rect.maxX - top, y: rect.maxY)
+            control1: CGPoint(x: rect.maxX - top - bottom * (1 - k), y: rect.maxY),
+            control2: CGPoint(x: rect.maxX - top, y: rect.maxY - bottom * (1 - k))
         )
         path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
-        // Trailing concave fillet: up and outward.
-        path.addQuadCurve(
+
+        // Trailing concave fillet: up and back into the bezel.
+        path.addCurve(
             to: CGPoint(x: rect.maxX, y: rect.minY),
-            control: CGPoint(x: rect.maxX - top, y: rect.minY)
+            control1: CGPoint(x: rect.maxX - top, y: rect.minY + top * (1 - k) * 0.9),
+            control2: CGPoint(x: rect.maxX - top * k * 1.25, y: rect.minY)
         )
+
         path.closeSubpath()
         return path
     }

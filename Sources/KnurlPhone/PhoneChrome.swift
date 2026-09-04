@@ -188,19 +188,6 @@ struct PhoneChip: View {
 
 // MARK: - Tint
 
-struct PhoneSelectedGlass: ViewModifier {
-    var active: Bool
-    var namespace: Namespace.ID
-
-    func body(content: Content) -> some View {
-        if active {
-            content.glassEffectID("face", in: namespace)
-        } else {
-            content
-        }
-    }
-}
-
 func phoneTint(mode: DialMode, progress: Double, muted: Bool) -> Color {
     let rgb = DialTint.rgb(progress: progress, muted: muted, mode: mode)
     return Color(red: rgb.0, green: rgb.1, blue: rgb.2)

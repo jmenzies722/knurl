@@ -93,7 +93,40 @@ struct HubHome: View {
 
     @ViewBuilder
     private var nowPlaying: some View {
-        if state.music.hasTrack {
+        if !state.music.hasTrack {
+            HubSection(title: "Playing") {
+                HStack(spacing: KnurlSpace.step) {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 20, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(KnurlPalette.inkFaint)
+                        .frame(width: 52, height: 52)
+                        .background {
+                            RoundedRectangle(cornerRadius: KnurlRadius.chip, style: .continuous)
+                                .fill(KnurlPalette.sunken)
+                        }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Nothing playing")
+                            .font(.knurlBody.weight(.semibold))
+                            .foregroundStyle(KnurlPalette.inkSoft)
+                        Text("Knurl follows Music.app. Start something and the dial becomes the playhead.")
+                            .font(.knurlEyebrow.weight(.regular))
+                            .foregroundStyle(KnurlPalette.inkFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    HubGlassButton(
+                        title: "Open Music",
+                        symbol: "play.fill",
+                        tint: HubTint.face(.media, progress: 0.6, muted: false)
+                    ) {
+                        state.revealMusic()
+                    }
+                }
+                .padding(KnurlSpace.step)
+                .knurlSurface(.sunken)
+            }
+        } else {
             HubSection(title: "Playing", accessory: state.music.genre.isEmpty ? nil : state.music.genre) {
                 VStack(spacing: KnurlSpace.step) {
                     HStack(alignment: .top, spacing: KnurlSpace.step) {

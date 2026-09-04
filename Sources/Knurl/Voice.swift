@@ -378,6 +378,13 @@ final class Voice {
         )
     }
 
+    /// True while either listening permission has never been answered. Denied
+    /// is not the same as unasked: if you said no, Knurl does not ask again.
+    static var needsListeningPrompt: Bool {
+        AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+            || SFSpeechRecognizer.authorizationStatus() == .notDetermined
+    }
+
     /// Asks for microphone and speech with the app in front, so the prompts
     /// land where the person is looking.
     static func requestListening() async -> Readiness {
