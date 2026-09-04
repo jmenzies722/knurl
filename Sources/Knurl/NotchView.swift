@@ -63,22 +63,32 @@ struct NotchView: View {
     /// One lit line, the width of the cutout and four points tall. Enough to
     /// say "something is running" from across a desk, small enough that it
     /// reads as the bezel rather than as a widget.
+    /// A progress bar the width of the notch, filling left to right.
+    ///
+    /// It used to be a stub capped at 42% of the tab and centre-aligned, so it
+    /// grew outward from the middle in both directions — it could never span
+    /// the notch, and at low progress it was a short dash floating in the
+    /// centre. A progress indicator fills from one end across a track that
+    /// shows you the whole distance; without the track there is nothing to
+    /// read the fill against.
     private var glanceLine: some View {
         GeometryReader { geometry in
-            Capsule()
-                .fill(housingTint)
-                .frame(
-                    width: max(22, geometry.size.width * 0.42
-                        * DialMath.clampVolume(housingProgress ?? 1)),
-                    height: 3
-                )
-                .shadow(color: housingTint.opacity(0.8), radius: 4)
-                .frame(width: geometry.size.width, alignment: .center)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.16))
+                Capsule()
+                    .fill(housingTint)
+                    .frame(width: max(4, geometry.size.width
+                        * DialMath.clampVolume(housingProgress ?? 1)))
+                    .shadow(color: housingTint.opacity(0.7), radius: 3)
+            }
+            .frame(height: 3)
+            .frame(maxHeight: .infinity, alignment: .center)
         }
-        .frame(maxHeight: .infinity, alignment: .center)
         .contentShape(Rectangle())
         .overlay(ImmediatePress { state.toggleNotch() })
         .accessibilityLabel(whisper.line)
+        .accessibilityValue(housingProgress.map { "\(Int($0 * 100)) percent" } ?? "")
         .accessibilityAddTraits(.isButton)
     }
 
@@ -290,13 +300,13 @@ struct NotchView: View {
     // camera was neither pleasant nor precise.
 
     private var glanceShelf: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 13) {
             subjectHeader
             if subject == .media { mediaScrubber }
             controlRow
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 18)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(whisper.line). \(whisper.detail)")
     }
@@ -318,21 +328,21 @@ struct NotchView: View {
                     }
                 }
             }
-            .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .frame(width: 54, height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .strokeBorder(.white.opacity(0.10), lineWidth: 1)
             }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(shelfTitle)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 Text(shelfDetail)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.5))
                     .lineLimit(1)
             }
 
@@ -366,23 +376,19 @@ struct NotchView: View {
                 ? state.music.displayedPlayhead(at: timeline.date)
                 : 0
             let elapsed = progress * state.music.duration
-            VStack(spacing: 4) {
-                NotchScrubber(
-                    symbol: "",
-                    progress: progress,
-                    tint: DialSwatch.media,
-                    label: "Playhead"
-                ) { state.music.seek(to: $0) }
-                HStack {
-                    Text(state.music.canSeek ? DialMath.clock(elapsed) : "—")
-                    Spacer()
-                    Text(state.music.canSeek
-                        ? "−\(DialMath.clock(max(0, state.music.duration - elapsed)))"
-                        : "—")
-                }
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.4))
-            }
+            // Times sit either side of the bar rather than on a line of their
+            // own beneath it. They describe the bar, so they belong to it —
+            // and it saves a whole row of height in a panel hanging over your
+            // work.
+            NotchScrubber(
+                symbol: "",
+                progress: progress,
+                label: "Playhead",
+                leading: state.music.canSeek ? DialMath.clock(elapsed) : "—",
+                trailing: state.music.canSeek
+                    ? "−\(DialMath.clock(max(0, state.music.duration - elapsed)))"
+                    : "—"
+            ) { state.music.seek(to: $0) }
         }
     }
 
@@ -393,7 +399,7 @@ struct NotchView: View {
     /// most often want to nudge were the two hardest to hit. Full width each,
     /// one above the other, costs a little height and doubles the resolution.
     private var controlRow: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 8) {
             NotchScrubber(
                 symbol: state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 progress: state.volumeProgress,
@@ -410,7 +416,7 @@ struct NotchView: View {
 
             HStack(spacing: 8) {
                 flowButton
-                shelfKey("square.grid.2x2.fill", "Open the Hub", size: 32) {
+                shelfKey("square.grid.2x2.fill", "Open the Hub", size: 34) {
                     state.presentHub()
                 }
             }
@@ -451,8 +457,8 @@ struct NotchView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 13)
-        .frame(height: 32)
+        .padding(.horizontal, 14)
+        .frame(height: 34)
         .frame(maxWidth: .infinity)
         .background {
             Capsule().fill(

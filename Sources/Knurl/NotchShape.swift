@@ -164,42 +164,56 @@ struct NotchRing: View {
 
 // MARK: - Scrubber
 //
-// A level you set by dragging along it. The notch already has a dial, and a
-// dial is the right control when you want to feel your way to a value — but
-// when you know you want "about a third" the shortest path is a bar you touch
-// at the third. Both, rather than an argument about which is better.
+// A level you set by dragging along it.
+//
+// White on translucent, like Control Center, and deliberately not tinted per
+// control. Three stacked bars in pink, blue and yellow read as a rainbow: the
+// colours were carrying category, which nobody needs — the icon beside each
+// one already says which is which. Colour in this panel is reserved for
+// state, so the only thing that lights up is Flow when it is listening, and
+// that now means something.
 
 struct NotchScrubber: View {
     var symbol: String
     var progress: Double
-    var tint: Color
+    /// Kept for callers that still pass one; the bar itself does not use it.
+    var tint: Color = .white
     var label: String
+    var leading: String? = nil
+    var trailing: String? = nil
     var onSet: (Double) -> Void
 
     @State private var dragging = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             if !symbol.isEmpty {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(dragging ? tint : .white.opacity(0.6))
-                    .frame(width: 16)
+                    .foregroundStyle(.white.opacity(dragging ? 0.95 : 0.55))
+                    .frame(width: 15)
                     .contentTransition(.symbolEffect(.replace))
+            }
+
+            if let leading {
+                Text(leading)
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 30, alignment: .leading)
             }
 
             GeometryReader { geometry in
                 let width = geometry.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.12))
+                    Capsule().fill(.white.opacity(0.14))
                     Capsule()
-                        .fill(tint)
-                        .frame(width: max(6, width * DialMath.clampVolume(progress)))
-                        .shadow(color: tint.opacity(0.5), radius: 3)
+                        .fill(.white)
+                        .frame(width: max(5, width * DialMath.clampVolume(progress)))
                 }
-                .frame(height: dragging ? 8 : 6)
+                .frame(height: dragging ? 7 : 5)
                 .frame(maxHeight: .infinity, alignment: .center)
+                // The bar is 5 points tall and the target is 22: you are
+                // pointing at a position, not at a line.
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -209,15 +223,20 @@ struct NotchScrubber: View {
                         }
                         .onEnded { _ in dragging = false }
                 )
-                .animation(.snappy(duration: 0.14), value: dragging)
+                .animation(.snappy(duration: 0.13), value: dragging)
             }
-            .frame(height: 18)
+            .frame(height: 22)
 
-            if !symbol.isEmpty {
+            if let trailing {
+                Text(trailing)
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 34, alignment: .trailing)
+            } else if leading == nil {
                 Text("\(Int((DialMath.clampVolume(progress) * 100).rounded()))")
-                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.55))
-                    .frame(width: 22, alignment: .trailing)
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 26, alignment: .trailing)
                     .contentTransition(.numericText())
             }
         }
@@ -225,10 +244,9 @@ struct NotchScrubber: View {
         .accessibilityLabel(label)
         .accessibilityValue("\(Int((DialMath.clampVolume(progress) * 100).rounded())) percent")
         .accessibilityAdjustableAction { direction in
-            let step = 0.05
             switch direction {
-            case .increment: onSet(min(1, progress + step))
-            case .decrement: onSet(max(0, progress - step))
+            case .increment: onSet(min(1, progress + 0.05))
+            case .decrement: onSet(max(0, progress - 0.05))
             default: break
             }
         }

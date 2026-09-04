@@ -574,6 +574,20 @@ struct NotchStageTests {
         #expect(housing.height == 38)
     }
 
+    @Test func everyStageIsCentredOnTheCutout() {
+        // The panel is centred on the housing and each stage is centred in the
+        // panel, so every stage's midpoint must land on the notch's midpoint.
+        // Off by a few points and it reads as crooked long before anyone can
+        // say why.
+        let frame = NotchMath.panelFrame(screen: screen, housing: housing)
+        for stage in NotchStage.allCases {
+            let size = NotchMath.contentSize(housing: housing, stage: stage)
+            let midX = frame.midX
+            #expect(abs(midX - housing.midX) < 0.001, "\(stage) must sit on the notch's centre")
+            #expect(size.width <= frame.width, "\(stage) must fit the panel")
+        }
+    }
+
     @Test func panelIsTopAnchoredAndCentredOnTheCutout() {
         let frame = NotchMath.panelFrame(screen: screen, housing: housing)
         // Top-anchored: the shape's flat top edge has to sit behind the
@@ -603,7 +617,9 @@ struct NotchStageTests {
 
         let hint = NotchMath.contentSize(housing: housing, stage: .glance)
         #expect(hint.width < housing.width, "the hint must tuck under, not stick out")
-        #expect(hint.width > 60, "but it still has to be visible")
+        // It carries a progress bar, so it needs most of the notch's width to
+        // read against — a third of it was a dash floating in the middle.
+        #expect(hint.width > housing.width * 0.9, "the hint must use the notch's width")
         // A capsule: corner radius is half the drop, so it has no corners.
         #expect(NotchStage.glance.bottomCornerRadius * 2 == NotchStage.glance.height)
     }

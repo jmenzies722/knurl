@@ -35,23 +35,23 @@ public enum NotchStage: String, Sendable, CaseIterable {
         // Sized to what it actually holds now — a subject, a scrubber and two
         // levels — rather than to the control panel it used to be. Every
         // point of height here is a point of black hanging over your work.
-        case .shelf: 196
+        case .shelf: 182
         case .flow: 116
         }
     }
 
     /// Width relative to the housing, per side. Negative means narrower.
     ///
-    /// Zero at rest, and deliberately *negative* at glance. A shape the full
-    /// width of the cutout with a few points of drop shows a wide black ledge
-    /// with hard ends below the bezel — square, and obviously beyond the
-    /// notch. Pulled in on both sides it becomes a small rounded tab tucked
-    /// underneath, which reads as part of the notch rather than as something
-    /// sticking out of it.
+    /// Zero at rest, and slightly negative at glance. The hint carries a
+    /// progress bar, so it wants the notch's width to read against — but at
+    /// exactly the cutout's width its ends land on the bezel's own corners and
+    /// show as a square ledge sticking out. Seven points in on each side puts
+    /// the rounded ends just inside the silhouette: full width to look at,
+    /// tucked under to the eye.
     public var flare: CGFloat {
         switch self {
         case .rest: 0
-        case .glance: -52
+        case .glance: -7
         case .hover: 96
         // Wider than hover: the shelf carries cover art, a title, three
         // transport keys and two more besides. Sized to its content rather
