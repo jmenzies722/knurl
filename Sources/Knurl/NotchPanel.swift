@@ -134,7 +134,7 @@ final class NotchPanel {
             // way rather than waiting for you.
             guard openWork == nil else { return }
             openWork = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(260))
+                try? await Task.sleep(for: .milliseconds(170))
                 guard !Task.isCancelled,
                       let state = AppDelegate.shared?.state,
                       NotchMath.hoverTarget(housing: state.notchHousing)

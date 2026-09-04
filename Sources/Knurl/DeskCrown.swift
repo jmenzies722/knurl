@@ -81,11 +81,10 @@ struct DeskCrown: View {
         .onModifierKeysChanged { _, next in modifiers = next }
         .gesture(turnGesture)
         .onTapGesture(perform: onConfirm)
-        .modifier(CrownScroll(enabled: true) { delta in
-            // Applied straight to the value. Rounding to detents here is what
-            // made scrolling feel like a ratchet instead of a dial; the faces
-            // that want detents already round in DialState.
-            onTurn(DialMath.clampVolume(clamped + delta))
+        .modifier(CrownScroll(enabled: true, current: clamped) { value in
+            // An absolute value, not a delta: the gesture owns the running
+            // total so it cannot compound off a stale render.
+            onTurn(value)
         })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(caption)
@@ -357,10 +356,21 @@ struct DeskCrown: View {
 
 private struct CrownScroll: ViewModifier {
     var enabled: Bool
+    /// The value the dial is on right now, so a gesture can be seeded from it.
+    var current: Double
     var onScroll: (Double) -> Void
 
     @State private var monitor: Any?
     @State private var frame: CGRect = .zero
+    /// The value this scroll gesture is building, independent of rendering.
+    ///
+    /// Scroll events arrive far faster than SwiftUI re-renders. Adding each
+    /// delta to the value read from the last render meant several events in a
+    /// row compounded off the same stale number — the dial lurched, snapped
+    /// back and lurched again. The gesture keeps its own running total and
+    /// only re-reads reality once you stop.
+    @State private var running: Double?
+    @State private var settle: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         content
@@ -381,10 +391,27 @@ private struct CrownScroll: ViewModifier {
             // Trackpads report many small precise deltas; a wheel reports few
             // large ones. Both are normalised to a fraction of the dial's
             // full sweep, so the same physical gesture moves the same amount.
+            // Momentum is the flick continuing after your fingers have left
+            // the trackpad. On a scroll view that is the point; on a dial it
+            // means the value keeps travelling after you stopped asking, which
+            // is most of what "spazzing" is.
+            guard event.momentumPhase == [] else { return nil }
+
             let raw = event.hasPreciseScrollingDeltas
-                ? event.scrollingDeltaY / 260
-                : event.scrollingDeltaY / 26
-            if raw != 0 { onScroll(Double(raw)) }
+                ? event.scrollingDeltaY / 420
+                : event.scrollingDeltaY / 34
+            guard raw != 0 else { return event }
+
+            let next = DialMath.clampVolume((running ?? current) + Double(raw))
+            running = next
+            onScroll(next)
+
+            settle?.cancel()
+            settle = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                running = nil
+            }
             return nil
         }
     }

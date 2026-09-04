@@ -121,12 +121,17 @@ struct NotchStageContainer<Content: View>: View {
                 .frame(width: size.width, height: size.height)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            // Tight, barely-bouncy, and fast. A notch that springs open with
-            // 22% bounce reads as a toy: the shape overshoots past the width
-            // it is going to settle at, so the fillets visibly wobble against
-            // a bezel that does not move. Precision here means arriving once.
+            // One spring for the whole thing — shape, size, corners and the
+            // content inside it — so it reads as a single object moving
+            // rather than a box that resizes and a layout that catches up.
+            //
+            // A little bounce, not none. Zero bounce is a drawer sliding;
+            // a small overshoot is what makes something feel like it has mass
+            // and settled, which is the whole trick Apple's own expansions
+            // use. It stays small because the fillets meet a bezel that does
+            // not move, and anything larger makes that seam visibly wobble.
             .animation(
-                lively ? .spring(duration: 0.28, bounce: 0.06) : .easeOut(duration: 0.14),
+                lively ? .spring(duration: 0.34, bounce: 0.14) : .easeOut(duration: 0.14),
                 value: stage
             )
     }

@@ -34,14 +34,13 @@ struct NotchView: View {
                     .frame(height: max(state.notchHousing.height, 1))
                 content
                     .frame(height: stage.height)
-                    .opacity(stage.isOpen || stage == .glance ? 1 : 0)
-                    .animation(
-                        lively ? .easeOut(duration: 0.18).delay(stage.isOpen ? 0.06 : 0) : nil,
-                        value: stage
-                    )
+                    // Grows with the shape rather than after it. The scale is
+                    // small on purpose: enough that the contents feel carried
+                    // out by the black, not enough to read as a zoom.
+                    .scaleEffect(stage.isOpen ? 1 : 0.94, anchor: .top)
+                    .opacity(stage == .rest ? 0 : 1)
             }
         }
-        .animation(motion, value: stage)
         .animation(motion, value: state.voice.preview)
         .animation(motion, value: whisper.line)
     }
@@ -291,13 +290,13 @@ struct NotchView: View {
     // camera was neither pleasant nor precise.
 
     private var glanceShelf: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 11) {
             subjectHeader
             if subject == .media { mediaScrubber }
             controlRow
         }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .accessibilityLabel("\(whisper.line). \(whisper.detail)")
     }
@@ -305,7 +304,7 @@ struct NotchView: View {
     /// Cover art at a size worth looking at, the title, and the transport —
     /// the shape every now-playing card has, because it is the right one.
     private var subjectHeader: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Group {
                 if subject == .media, let cover = state.music.cover {
                     Image(nsImage: cover).resizable().scaledToFill()
@@ -319,10 +318,10 @@ struct NotchView: View {
                     }
                 }
             }
-            .frame(width: 52, height: 52)
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .strokeBorder(.white.opacity(0.10), lineWidth: 1)
             }
 
@@ -340,15 +339,15 @@ struct NotchView: View {
             Spacer(minLength: 8)
 
             if subject == .media {
-                HStack(spacing: 10) {
-                    shelfKey("backward.fill", "Previous", size: 34) { state.skip(-1) }
+                HStack(spacing: 8) {
+                    shelfKey("backward.fill", "Previous", size: 30) { state.skip(-1) }
                     shelfKey(
                         state.music.isPlaying ? "pause.fill" : "play.fill",
                         state.music.isPlaying ? "Pause" : "Play",
-                        size: 44,
+                        size: 38,
                         prominent: true
                     ) { state.collapsedPlay() }
-                    shelfKey("forward.fill", "Next", size: 34) { state.skip(1) }
+                    shelfKey("forward.fill", "Next", size: 30) { state.skip(1) }
                 }
             } else if subject == .hour {
                 shelfKey(
